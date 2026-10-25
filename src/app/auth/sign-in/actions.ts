@@ -2,6 +2,7 @@
 
 import { AuthError } from "next-auth";
 import { z } from "zod";
+import { env } from "@/env";
 import { signIn } from "@/lib/auth";
 
 export type SignInState = { error?: string };
@@ -9,13 +10,18 @@ export type SignInState = { error?: string };
 const credentialsSchema = z.object({
   email: z.string().trim().toLowerCase().email("Enter a valid email address."),
   password: z.string().min(1, "Enter your password."),
-  // Only same-origin relative paths are allowed as a post-sign-in destination.
-  callbackUrl: z
-    .string()
-    .regex(/^\/(?!\/)/)
-    .optional()
-    .catch(undefined),
+  callbackUrl: z.string().optional().transform(toSameOriginPath).catch(undefined),
 });
+
+// Only same-origin destinations are allowed after sign-in (middleware sends
+// absolute URLs); anything else falls back to the dashboard.
+function toSameOriginPath(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const appUrl = new URL(env.NEXT_PUBLIC_APP_URL);
+  if (!URL.canParse(value, appUrl)) return undefined;
+  const url = new URL(value, appUrl);
+  return url.origin === appUrl.origin ? `${url.pathname}${url.search}` : undefined;
+}
 
 export async function signInWithCredentials(
   _prevState: SignInState,
