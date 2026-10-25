@@ -1,3 +1,10 @@
+import { createJiti } from "jiti";
+
+const jiti = createJiti(import.meta.url);
+
+// Validate environment variables at build and startup.
+await jiti.import("./src/env.ts");
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   experimental: {
