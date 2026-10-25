@@ -23,6 +23,8 @@ export const env = createEnv({
     NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
   },
   // Lets CI/Vercel builds run without real secrets; runtime still validates.
-  skipValidation: !!process.env.SKIP_ENV_VALIDATION,
+  // `next lint` loads next.config.mjs too, but never needs the real env.
+  skipValidation:
+    !!process.env.SKIP_ENV_VALIDATION || process.env.npm_lifecycle_event === "lint",
   emptyStringAsUndefined: true,
 });
