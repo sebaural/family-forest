@@ -1,0 +1,6 @@
+{
+  "framework": "nextjs",
+  "buildCommand": "pnpm prisma generate && pnpm build",
+  "installCommand": "pnpm install",
+  "env": { "SKIP_ENV_VALIDATION": "1" }
+}
