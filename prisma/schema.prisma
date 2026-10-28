@@ -80,6 +80,9 @@ model FamilyTree {
 
   owner         User               @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   collaborators TreeCollaborator[]
+  members       Member[]
+  relationships Relationship[]
+  invitations   Invitation[]
 }
 
 // ── Collaborators ─────────────────────────────────────────────────────────
@@ -127,4 +130,65 @@ enum SubscriptionStatus {
   PAST_DUE
   CANCELED
   TRIALING
+}
+
+// ── Domain models ─────────────────────────────────────────────────────────
+model Member {
+  id         String    @id @default(cuid())
+  treeId     String
+  firstName  String
+  lastName   String
+  birthDate  DateTime?
+  deathDate  DateTime?
+  birthPlace String?
+  occupation String?
+  bio        String?   @db.Text
+  photoUrl   String?
+  userId     String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  tree     FamilyTree     @relation(fields: [treeId], references: [id], onDelete: Cascade)
+  asParent Relationship[] @relation("fromMember")
+  asChild  Relationship[] @relation("toMember")
+
+  @@index([treeId])
+}
+
+// For PARENT_CHILD, `from` is the parent and `to` is the child.
+model Relationship {
+  id     String  @id @default(cuid())
+  treeId String
+  type   RelType
+  fromId String
+  toId   String
+
+  tree FamilyTree @relation(fields: [treeId], references: [id], onDelete: Cascade)
+  from Member     @relation("fromMember", fields: [fromId], references: [id], onDelete: Cascade)
+  to   Member     @relation("toMember", fields: [toId], references: [id], onDelete: Cascade)
+
+  @@unique([fromId, toId, type])
+  @@index([treeId])
+}
+
+enum RelType {
+  PARENT_CHILD
+  SPOUSE
+  PARTNER
+}
+
+model Invitation {
+  id        String     @id @default(cuid())
+  treeId    String
+  email     String
+  role      CollabRole @default(VIEWER)
+  token     String     @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime   @default(now())
+
+  tree FamilyTree @relation(fields: [treeId], references: [id], onDelete: Cascade)
+
+  @@index([email])
+  @@index([treeId])
 }
