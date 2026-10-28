@@ -41,4 +41,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     }),
     ...authConfig.providers,
   ],
+  events: {
+    // Credentials sign-up creates its own Subscription; OAuth users get one here.
+    createUser: async ({ user }) => {
+      if (!user.id) return;
+      await db.subscription.upsert({
+        where: { userId: user.id },
+        create: { userId: user.id, plan: "FREE", status: "ACTIVE" },
+        update: {},
+      });
+    },
+  },
 });
