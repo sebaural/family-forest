@@ -3,7 +3,8 @@ import { z } from "zod";
 
 export const env = createEnv({
   server: {
-    DATABASE_URL: z.string().url(),
+    DATABASE_URL: z.url(),
+    DIRECT_URL: z.url(),
     NEXTAUTH_SECRET: z.string().min(32),
     GOOGLE_CLIENT_ID: z.string().optional(),
     GOOGLE_CLIENT_SECRET: z.string().optional(),
@@ -11,10 +12,11 @@ export const env = createEnv({
     GITHUB_CLIENT_SECRET: z.string().optional(),
   },
   client: {
-    NEXT_PUBLIC_APP_URL: z.string().url(),
+    NEXT_PUBLIC_APP_URL: z.url(),
   },
   runtimeEnv: {
     DATABASE_URL: process.env.DATABASE_URL,
+    DIRECT_URL: process.env.DIRECT_URL,
     NEXTAUTH_SECRET: process.env.NEXTAUTH_SECRET,
     GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID,
     GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
@@ -22,7 +24,7 @@ export const env = createEnv({
     GITHUB_CLIENT_SECRET: process.env.GITHUB_CLIENT_SECRET,
     NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
   },
-  // Lets CI/Vercel builds run without real secrets; runtime still validates.
+  // Escape hatch for builds without real secrets (set SKIP_ENV_VALIDATION=1).
   // `next lint` loads next.config.mjs too, but never needs the real env.
   skipValidation:
     !!process.env.SKIP_ENV_VALIDATION || process.env.npm_lifecycle_event === "lint",

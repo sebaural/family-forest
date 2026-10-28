@@ -20,5 +20,6 @@ jobs:
       - run: pnpm build
         env:
           DATABASE_URL: postgresql://postgres:password@localhost:5432/test
+          DIRECT_URL: postgresql://postgres:password@localhost:5432/test
           NEXTAUTH_SECRET: test-secret-at-least-32-chars-long-xx
           NEXT_PUBLIC_APP_URL: http://localhost:3000
