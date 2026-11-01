@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 
 const PLAN_LIMITS = {
-  FREE: { trees: 1, members: 50, collaborators: 2 },
+  FREE: { trees: 1, members: 25, collaborators: 2 },
   PRO: { trees: Infinity, members: Infinity, collaborators: 20 },
   FAMILY: { trees: Infinity, members: Infinity, collaborators: Infinity },
 } as const;
