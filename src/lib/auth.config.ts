@@ -40,7 +40,12 @@ export const authConfig = {
     authorized({ auth, request: { nextUrl } }) {
       const isSignedIn = !!auth?.user;
 
-      if (nextUrl.pathname.startsWith("/dashboard")) {
+      if (
+        nextUrl.pathname === "/dashboard" ||
+        nextUrl.pathname.startsWith("/dashboard/") ||
+        nextUrl.pathname === "/tree" ||
+        nextUrl.pathname.startsWith("/tree/")
+      ) {
         // Returning false redirects to pages.signIn with a callbackUrl.
         return isSignedIn;
       }

@@ -43,23 +43,28 @@ export const treesRouter = router({
   }),
 
   get: protectedProcedure.input(z.object({ treeId })).query(async ({ ctx, input }) => {
-    await assertTreeAccess(input.treeId, ctx.session.user.id);
-    return db.familyTree.findUniqueOrThrow({
-      where: { id: input.treeId },
-      include: {
-        members: {
-          select: { id: true, firstName: true, lastName: true },
-          orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
-        },
-        collaborators: {
-          select: {
-            role: true,
-            createdAt: true,
-            user: { select: { id: true, name: true, email: true, image: true } },
+    const { ownerId, role } = await assertTreeAccess(input.treeId, ctx.session.user.id);
+    // The member cap follows the tree owner's plan, not the caller's.
+    const [tree, limits] = await Promise.all([
+      db.familyTree.findUniqueOrThrow({
+        where: { id: input.treeId },
+        include: {
+          members: {
+            select: { id: true, firstName: true, lastName: true },
+            orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
+          },
+          collaborators: {
+            select: {
+              role: true,
+              createdAt: true,
+              user: { select: { id: true, name: true, email: true, image: true } },
+            },
           },
         },
-      },
-    });
+      }),
+      getPlanLimits(ownerId),
+    ]);
+    return { ...tree, role, memberLimit: limits.members };
   }),
 
   update: protectedProcedure

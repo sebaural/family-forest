@@ -71,7 +71,7 @@ export const relationshipsRouter = router({
               { fromId: toId, toId: fromId },
             ];
       const existing = await db.relationship.findFirst({
-        where: { type, OR: pairs },
+        where: { treeId, type, OR: pairs },
         select: { id: true },
       });
       if (existing) {

@@ -16,7 +16,21 @@ const memberInput = z.object({
   photoUrl: z.url().optional(),
 });
 
-const toDate = (value: string | undefined) => (value === undefined ? undefined : new Date(value));
+// On update, undefined leaves a field unchanged and null clears it.
+const memberUpdateInput = memberInput.partial().extend({
+  memberId: z.cuid(),
+  birthDate: memberInput.shape.birthDate.nullable(),
+  deathDate: memberInput.shape.deathDate.nullable(),
+  birthPlace: memberInput.shape.birthPlace.nullable(),
+  occupation: memberInput.shape.occupation.nullable(),
+  bio: memberInput.shape.bio.nullable(),
+});
+
+function toDate(value: string | undefined): Date | undefined;
+function toDate(value: string | null | undefined): Date | null | undefined;
+function toDate(value: string | null | undefined) {
+  return value == null ? value : new Date(value);
+}
 
 async function getMemberTreeId(memberId: string): Promise<string> {
   const member = await db.member.findUnique({ where: { id: memberId }, select: { treeId: true } });
@@ -56,7 +70,7 @@ export const membersRouter = router({
   }),
 
   update: protectedProcedure
-    .input(memberInput.partial().extend({ memberId: z.cuid() }))
+    .input(memberUpdateInput)
     .mutation(async ({ ctx, input }) => {
       const treeId = await getMemberTreeId(input.memberId);
       await assertTreeAccess(treeId, ctx.session.user.id, "EDITOR");
