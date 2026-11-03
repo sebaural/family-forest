@@ -1,6 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
+import { CYCLE_ERROR_MESSAGE } from "@/lib/trpc-error";
 import { assertTreeAccess } from "@/server/access";
 import { protectedProcedure, router } from "@/server/trpc";
 
@@ -56,10 +57,7 @@ export const relationshipsRouter = router({
       if (inTree !== 2) throw new TRPCError({ code: "NOT_FOUND", message: "Member not found" });
 
       if (type === "PARENT_CHILD" && (await wouldCreateCycle(treeId, fromId, toId))) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "This would make someone their own ancestor",
-        });
+        throw new TRPCError({ code: "BAD_REQUEST", message: CYCLE_ERROR_MESSAGE });
       }
 
       // SPOUSE and PARTNER are symmetric, so B→A duplicates A→B.
