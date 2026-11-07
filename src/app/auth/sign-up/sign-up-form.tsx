@@ -1,5 +1,6 @@
 "use client";
 
+import type { Route } from "next";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { useFormState, useFormStatus } from "react-dom";
@@ -18,13 +19,17 @@ function SubmitButton() {
   );
 }
 
-export function SignUpForm() {
+export function SignUpForm({ callbackUrl }: { callbackUrl?: string }) {
   const router = useRouter();
   const [state, formAction] = useFormState<SignUpResult | null, FormData>(signUp, null);
 
   useEffect(() => {
-    if (state && "success" in state) router.push("/auth/sign-in?registered=1");
-  }, [state, router]);
+    if (state && "success" in state) {
+      // The sign-in action only honors same-origin callback URLs.
+      const next = callbackUrl ? `&callbackUrl=${encodeURIComponent(callbackUrl)}` : "";
+      router.push(`/auth/sign-in?registered=1${next}` as Route);
+    }
+  }, [state, router, callbackUrl]);
 
   return (
     <form action={formAction} className="space-y-4">

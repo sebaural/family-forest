@@ -27,6 +27,9 @@ model User {
   trees          FamilyTree[]
   subscription   Subscription?
   collaborations TreeCollaborator[]
+
+  invitationsSent     Invitation[] @relation("invitationsSent")
+  invitationsAccepted Invitation[] @relation("invitationsAccepted")
 }
 
 enum UserRole {
@@ -176,17 +179,22 @@ enum RelType {
   PARTNER
 }
 
+// Status is derived: accepted when acceptedAt is set, expired after expiresAt, otherwise pending.
 model Invitation {
-  id        String     @id @default(cuid())
-  treeId    String
-  email     String
-  role      CollabRole @default(VIEWER)
-  token     String     @unique
-  expiresAt DateTime
-  usedAt    DateTime?
-  createdAt DateTime   @default(now())
+  id           String     @id @default(cuid())
+  treeId       String
+  email        String // stored lower-cased
+  role         CollabRole @default(VIEWER)
+  tokenHash    String     @unique // SHA-256 of the signed invite JWT; the raw token is never stored
+  expiresAt    DateTime
+  acceptedAt   DateTime?
+  invitedById  String?
+  acceptedById String?
+  createdAt    DateTime   @default(now())
 
-  tree FamilyTree @relation(fields: [treeId], references: [id], onDelete: Cascade)
+  tree       FamilyTree @relation(fields: [treeId], references: [id], onDelete: Cascade)
+  invitedBy  User?      @relation("invitationsSent", fields: [invitedById], references: [id], onDelete: SetNull)
+  acceptedBy User?      @relation("invitationsAccepted", fields: [acceptedById], references: [id], onDelete: SetNull)
 
   @@index([email])
   @@index([treeId])

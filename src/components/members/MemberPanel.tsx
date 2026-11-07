@@ -4,8 +4,10 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useState } from "react";
 import { useForm, type FieldError } from "react-hook-form";
 import { z } from "zod";
+import { format } from "date-fns";
 import { PhotoField } from "@/components/members/PhotoField";
 import { MemberRelationships } from "@/components/relationships/MemberRelationships";
+import { MemberAvatar } from "@/components/tree/MemberList";
 import { Spinner } from "@/components/ui/Spinner";
 import {
   dangerButton,
@@ -66,6 +68,41 @@ function Field({
       {children}
       {error?.message && <span className={`block ${errorText}`}>{error.message}</span>}
     </label>
+  );
+}
+
+function formatDay(date: Date | null): string | null {
+  const value = toDateInputValue(date); // "YYYY-MM-DD", read in UTC
+  return value ? format(new Date(`${value}T00:00:00`), "MMM d, yyyy") : null;
+}
+
+/** Read-only view for VIEWERs: no inputs at all, not even disabled ones. */
+function MemberDetails({ member }: { member: Member }) {
+  const rows = [
+    ["Born", [formatDay(member.birthDate), member.birthPlace].filter(Boolean).join(" · ")],
+    ["Died", formatDay(member.deathDate)],
+  ] as const;
+  return (
+    <div className="space-y-4">
+      {member.photoUrl && <MemberAvatar member={member} size="lg" />}
+      <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-sm">
+        {rows.map(([label, value]) =>
+          value ? (
+            <div key={label} className="contents">
+              <dt className="font-medium">{label}</dt>
+              <dd className={mutedText}>{value}</dd>
+            </div>
+          ) : null,
+        )}
+        {!member.deathDate && (
+          <div className="contents">
+            <dt className="font-medium">Status</dt>
+            <dd className={mutedText}>Living</dd>
+          </div>
+        )}
+      </dl>
+      {member.bio && <p className="whitespace-pre-line text-sm">{member.bio}</p>}
+    </div>
   );
 }
 
@@ -171,82 +208,86 @@ export function MemberPanel({
         </div>
       )}
 
-      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4" noValidate>
-        <fieldset disabled={!canEdit} className="space-y-4">
-          {(photoUploadsEnabled || photoUrl) && (
-            <PhotoField
-              treeId={treeId}
-              firstName={firstName}
-              lastName={lastName}
-              value={photoUrl}
-              onChange={(url) => form.setValue("photoUrl", url, { shouldDirty: true })}
-              onUploadingChange={setUploadingPhoto}
-              canEdit={canEdit && photoUploadsEnabled}
-            />
-          )}
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="First name" error={errors.firstName}>
-              <input {...form.register("firstName")} className={inputClass} />
-            </Field>
-            <Field label="Last name" error={errors.lastName}>
-              <input {...form.register("lastName")} className={inputClass} />
-            </Field>
-            <Field label="Birth date" error={errors.birthDate}>
-              <input type="date" {...form.register("birthDate")} className={inputClass} />
-            </Field>
-            <Field label="Death date" error={errors.deathDate}>
-              <input
-                type="date"
-                {...form.register("deathDate")}
-                disabled={living}
-                className={inputClass}
+      {!canEdit && member ? (
+        <MemberDetails member={member} />
+      ) : (
+        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4" noValidate>
+          <fieldset disabled={!canEdit} className="space-y-4">
+            {(photoUploadsEnabled || photoUrl) && (
+              <PhotoField
+                treeId={treeId}
+                firstName={firstName}
+                lastName={lastName}
+                value={photoUrl}
+                onChange={(url) => form.setValue("photoUrl", url, { shouldDirty: true })}
+                onUploadingChange={setUploadingPhoto}
+                canEdit={canEdit && photoUploadsEnabled}
               />
+            )}
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="First name" error={errors.firstName}>
+                <input {...form.register("firstName")} className={inputClass} />
+              </Field>
+              <Field label="Last name" error={errors.lastName}>
+                <input {...form.register("lastName")} className={inputClass} />
+              </Field>
+              <Field label="Birth date" error={errors.birthDate}>
+                <input type="date" {...form.register("birthDate")} className={inputClass} />
+              </Field>
+              <Field label="Death date" error={errors.deathDate}>
+                <input
+                  type="date"
+                  {...form.register("deathDate")}
+                  disabled={living}
+                  className={inputClass}
+                />
+              </Field>
+            </div>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                {...form.register("living", {
+                  onChange: (event) => {
+                    if (event.target.checked) form.setValue("deathDate", "");
+                  },
+                })}
+              />
+              Living
+            </label>
+            <Field label="Birth place" error={errors.birthPlace}>
+              <input {...form.register("birthPlace")} className={inputClass} />
             </Field>
-          </div>
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              {...form.register("living", {
-                onChange: (event) => {
-                  if (event.target.checked) form.setValue("deathDate", "");
-                },
-              })}
-            />
-            Living
-          </label>
-          <Field label="Birth place" error={errors.birthPlace}>
-            <input {...form.register("birthPlace")} className={inputClass} />
-          </Field>
-          <Field label="Bio" error={errors.bio}>
-            <textarea {...form.register("bio")} rows={4} className={inputClass} />
-          </Field>
-        </fieldset>
+            <Field label="Bio" error={errors.bio}>
+              <textarea {...form.register("bio")} rows={4} className={inputClass} />
+            </Field>
+          </fieldset>
 
-        {saveError && (
-          <p role="alert" className={errorText}>
-            {getErrorMessage(saveError)}
-          </p>
-        )}
+          {saveError && (
+            <p role="alert" className={errorText}>
+              {getErrorMessage(saveError)}
+            </p>
+          )}
 
-        {canEdit && (
-          <div className="flex flex-wrap items-center gap-2">
-            <button type="submit" disabled={saving || uploadingPhoto} className={primaryButton}>
-              {saving && <Spinner />}
-              {member ? "Save changes" : "Add member"}
-            </button>
-            {!member && (
-              <button type="button" onClick={onClose} className={secondaryButton}>
-                Cancel
+          {canEdit && (
+            <div className="flex flex-wrap items-center gap-2">
+              <button type="submit" disabled={saving || uploadingPhoto} className={primaryButton}>
+                {saving && <Spinner />}
+                {member ? "Save changes" : "Add member"}
               </button>
-            )}
-            {member && updateMember.isSuccess && (
-              <span role="status" className={mutedText}>
-                Saved
-              </span>
-            )}
-          </div>
-        )}
-      </form>
+              {!member && (
+                <button type="button" onClick={onClose} className={secondaryButton}>
+                  Cancel
+                </button>
+              )}
+              {member && updateMember.isSuccess && (
+                <span role="status" className={mutedText}>
+                  Saved
+                </span>
+              )}
+            </div>
+          )}
+        </form>
+      )}
 
       {member && (
         <MemberRelationships treeId={treeId} member={member} members={members} canEdit={canEdit} />

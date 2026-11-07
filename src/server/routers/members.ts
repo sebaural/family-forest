@@ -3,6 +3,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { PHOTO_MAX_BYTES, PHOTO_TYPES, type PhotoContentType } from "@/lib/photo";
 import { getPlanLimits } from "@/lib/plan-limits";
+import { broadcastTreeEvent } from "@/lib/realtime";
 import { createPhotoUploadUrl, deletePhotoByUrl, treePhotoPrefix } from "@/lib/r2";
 import { assertTreeAccess } from "@/server/access";
 import { protectedProcedure, router } from "@/server/trpc";
@@ -72,9 +73,11 @@ export const membersRouter = router({
       assertTreePhoto(input.treeId, input.photoUrl);
 
       const { birthDate, deathDate, ...rest } = input;
-      return db.member.create({
+      const created = await db.member.create({
         data: { ...rest, birthDate: toDate(birthDate), deathDate: toDate(deathDate) },
       });
+      await broadcastTreeEvent(input.treeId, "members_changed");
+      return created;
     }),
 
   get: protectedProcedure.input(z.object({ memberId: z.cuid() })).query(async ({ ctx, input }) => {
@@ -100,6 +103,7 @@ export const membersRouter = router({
       if (input.photoUrl !== undefined && existing.photoUrl !== updated.photoUrl) {
         await deletePhotoByUrl(existing.photoUrl);
       }
+      await broadcastTreeEvent(existing.treeId, "members_changed");
       return updated;
     }),
 
@@ -111,6 +115,7 @@ export const membersRouter = router({
       // Relationships referencing this member cascade.
       await db.member.delete({ where: { id: input.memberId } });
       await deletePhotoByUrl(existing.photoUrl);
+      await broadcastTreeEvent(existing.treeId, "members_changed");
       return { id: input.memberId };
     }),
 

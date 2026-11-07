@@ -1,3 +1,4 @@
+import { invitationsRouter } from "@/server/routers/invitations";
 import { membersRouter } from "@/server/routers/members";
 import { relationshipsRouter } from "@/server/routers/relationships";
 import { treesRouter } from "@/server/routers/trees";
@@ -9,6 +10,7 @@ export const appRouter = router({
   members: membersRouter,
   relationships: relationshipsRouter,
   user: userRouter,
+  invitations: invitationsRouter,
 });
 
 export type AppRouter = typeof appRouter;

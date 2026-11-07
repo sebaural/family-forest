@@ -2,6 +2,7 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { CYCLE_ERROR_MESSAGE } from "@/lib/trpc-error";
+import { broadcastTreeEvent } from "@/lib/realtime";
 import { assertTreeAccess } from "@/server/access";
 import { protectedProcedure, router } from "@/server/trpc";
 
@@ -76,7 +77,9 @@ export const relationshipsRouter = router({
         throw new TRPCError({ code: "CONFLICT", message: "This relationship already exists" });
       }
 
-      return db.relationship.create({ data: { treeId, fromId, toId, type } });
+      const created = await db.relationship.create({ data: { treeId, fromId, toId, type } });
+      await broadcastTreeEvent(treeId, "members_changed");
+      return created;
     }),
 
   remove: protectedProcedure
@@ -91,6 +94,7 @@ export const relationshipsRouter = router({
       }
       await assertTreeAccess(relationship.treeId, ctx.session.user.id, "EDITOR");
       await db.relationship.delete({ where: { id: input.relationshipId } });
+      await broadcastTreeEvent(relationship.treeId, "members_changed");
       return { id: input.relationshipId };
     }),
 

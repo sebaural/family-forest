@@ -1,3 +1,4 @@
+import type { Route } from "next";
 import Link from "next/link";
 import { signInWithProvider } from "@/app/auth/sign-in/actions";
 import { SignInForm } from "@/app/auth/sign-in/sign-in-form";
@@ -26,6 +27,9 @@ export default function SignInPage({ searchParams }: SignInPageProps) {
           {configuredOAuthProviders.map((provider) => (
             <form key={provider.id} action={signInWithProvider}>
               <input type="hidden" name="provider" value={provider.id} />
+              {searchParams.callbackUrl && (
+                <input type="hidden" name="callbackUrl" value={searchParams.callbackUrl} />
+              )}
               <button
                 type="submit"
                 className="w-full rounded border border-gray-300 px-4 py-2 font-medium hover:bg-gray-50 hover:text-gray-900"
@@ -39,7 +43,14 @@ export default function SignInPage({ searchParams }: SignInPageProps) {
 
       <p className="text-center text-sm">
         No account yet?{" "}
-        <Link href="/auth/sign-up" className="font-medium text-emerald-700 underline">
+        <Link
+          href={
+            (searchParams.callbackUrl
+              ? `/auth/sign-up?callbackUrl=${encodeURIComponent(searchParams.callbackUrl)}`
+              : "/auth/sign-up") as Route
+          }
+          className="font-medium text-emerald-700 underline"
+        >
           Create one
         </Link>
       </p>

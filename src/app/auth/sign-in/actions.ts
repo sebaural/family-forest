@@ -62,5 +62,7 @@ const providerSchema = z.enum(["google", "github"]);
 
 export async function signInWithProvider(formData: FormData): Promise<void> {
   const provider = providerSchema.parse(formData.get("provider"));
-  await signIn(provider, { redirectTo: "/dashboard" });
+  const callbackUrl = formData.get("callbackUrl");
+  const redirectTo = typeof callbackUrl === "string" ? toSameOriginPath(callbackUrl) : undefined;
+  await signIn(provider, { redirectTo: redirectTo ?? "/dashboard" });
 }

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { getPlanLimits } from "@/lib/plan-limits";
 import { isR2Configured } from "@/lib/r2";
+import { broadcastTreeEvent } from "@/lib/realtime";
 import { assertTreeAccess } from "@/server/access";
 import { protectedProcedure, router } from "@/server/trpc";
 
@@ -50,6 +51,7 @@ export const treesRouter = router({
       db.familyTree.findUniqueOrThrow({
         where: { id: input.treeId },
         include: {
+          owner: { select: { id: true, name: true, email: true, image: true } },
           members: {
             select: { id: true, firstName: true, lastName: true },
             orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
@@ -69,6 +71,7 @@ export const treesRouter = router({
       ...tree,
       role,
       memberLimit: limits.members,
+      collaboratorLimit: limits.collaborators,
       photoUploadsEnabled: isR2Configured(),
     };
   }),
@@ -84,16 +87,20 @@ export const treesRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       await assertTreeAccess(input.treeId, ctx.session.user.id, "OWNER");
-      return db.familyTree.update({
+      const updated = await db.familyTree.update({
         where: { id: input.treeId },
         data: { name: input.name, description: input.description },
       });
+      await broadcastTreeEvent(input.treeId, "members_changed");
+      return updated;
     }),
 
   delete: protectedProcedure.input(z.object({ treeId })).mutation(async ({ ctx, input }) => {
     await assertTreeAccess(input.treeId, ctx.session.user.id, "OWNER");
     // Members, relationships, invitations and collaborators cascade.
     await db.familyTree.delete({ where: { id: input.treeId } });
+    // Collaborators' open workspaces refetch, get NOT_FOUND and leave.
+    await broadcastTreeEvent(input.treeId, "access_changed");
     return { id: input.treeId };
   }),
 });

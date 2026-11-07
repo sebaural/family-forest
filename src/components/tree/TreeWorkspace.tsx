@@ -1,14 +1,16 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { MemberPanel } from "@/components/members/MemberPanel";
 import { PlanLimitBanner } from "@/components/PlanLimitBanner";
+import { ShareDialog } from "@/components/share/ShareDialog";
 import { MemberList } from "@/components/tree/MemberList";
 import { DeleteTreeDialog, RenameTreeDialog } from "@/components/trees/TreeDialogs";
 import { Dialog } from "@/components/ui/Dialog";
 import { KebabMenu } from "@/components/ui/KebabMenu";
 import { errorText, mutedText, primaryButton, secondaryButton } from "@/components/ui/styles";
+import { useTreeEvents } from "@/hooks/useTreeEvents";
 import { useTreeMembers } from "@/hooks/useTreeMembers";
 import { getErrorMessage } from "@/lib/trpc-error";
 import { trpc } from "@/trpc/client";
@@ -20,8 +22,19 @@ export function TreeWorkspace({ treeId }: { treeId: string }) {
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
-  const [treeDialog, setTreeDialog] = useState<"rename" | "delete" | null>(null);
+  const [treeDialog, setTreeDialog] = useState<"rename" | "delete" | "share" | null>(null);
 
+  useTreeEvents(treeId);
+
+  // Access can be revoked (or the tree deleted) while the workspace is open.
+  const lostAccess = tree.error?.data?.code === "NOT_FOUND";
+  useEffect(() => {
+    if (lostAccess) router.replace("/dashboard?error=tree-not-found");
+  }, [lostAccess, router]);
+
+  if (lostAccess) {
+    return <p className={`px-4 py-8 ${mutedText}`}>You no longer have access to this tree.</p>;
+  }
   if (tree.error) {
     return (
       <main className="mx-auto w-full max-w-5xl space-y-2 px-4 py-8">
@@ -72,13 +85,15 @@ export function TreeWorkspace({ treeId }: { treeId: string }) {
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <div className="hidden md:block">{addMemberButton}</div>
+          <button type="button" onClick={() => setTreeDialog("share")} className={secondaryButton}>
+            Share
+          </button>
           {isOwner && (
             <KebabMenu
               label="Tree actions"
               items={[
                 { label: "Rename tree", onSelect: () => setTreeDialog("rename") },
                 { label: "Delete tree", danger: true, onSelect: () => setTreeDialog("delete") },
-                { label: "Share (coming soon)", disabled: true },
               ]}
             />
           )}
@@ -160,6 +175,12 @@ export function TreeWorkspace({ treeId }: { treeId: string }) {
           />
         )}
       </Dialog>
+
+      <ShareDialog
+        tree={tree.data}
+        open={treeDialog === "share"}
+        onClose={() => setTreeDialog(null)}
+      />
 
       {isOwner && (
         <>

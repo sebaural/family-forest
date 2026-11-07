@@ -52,6 +52,7 @@ export function PhotoField({
   const signUpload = trpc.members.photoUploadUrl.useMutation();
 
   const uploading = progress !== null;
+  const [dragging, setDragging] = useState(false);
 
   const handleFile = async (file: File) => {
     setError(null);
@@ -88,8 +89,29 @@ export function PhotoField({
     }
   };
 
+  const dropHandlers = canEdit
+    ? {
+        onDragOver: (event: React.DragEvent) => {
+          event.preventDefault();
+          if (!uploading) setDragging(true);
+        },
+        onDragLeave: () => setDragging(false),
+        onDrop: (event: React.DragEvent) => {
+          event.preventDefault();
+          setDragging(false);
+          const file = event.dataTransfer.files[0];
+          if (file && !uploading) void handleFile(file);
+        },
+      }
+    : {};
+
   return (
-    <div className="flex items-center gap-4">
+    <div
+      {...dropHandlers}
+      className={`flex items-center gap-4 rounded-lg p-2 -m-2 ${
+        dragging ? "bg-emerald-50 ring-2 ring-emerald-500 dark:bg-emerald-950" : ""
+      }`}
+    >
       <MemberAvatar member={{ firstName: firstName || "?", lastName, photoUrl: value }} size="lg" />
       <div className="min-w-0 space-y-2">
         <span className="block text-sm font-medium">Picture</span>
@@ -143,7 +165,11 @@ export function PhotoField({
             />
           </div>
         ) : (
-          canEdit && <p className={`text-xs ${mutedText}`}>JPEG, PNG or WebP, up to 5 MB.</p>
+          canEdit && (
+            <p className={`text-xs ${mutedText}`}>
+              JPEG, PNG or WebP, up to 5 MB. You can also drop a file here.
+            </p>
+          )
         )}
         {error && (
           <p role="alert" className={errorText}>
