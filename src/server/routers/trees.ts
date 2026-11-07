@@ -2,6 +2,7 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { getPlanLimits } from "@/lib/plan-limits";
+import { isR2Configured } from "@/lib/r2";
 import { assertTreeAccess } from "@/server/access";
 import { protectedProcedure, router } from "@/server/trpc";
 
@@ -64,7 +65,12 @@ export const treesRouter = router({
       }),
       getPlanLimits(ownerId),
     ]);
-    return { ...tree, role, memberLimit: limits.members };
+    return {
+      ...tree,
+      role,
+      memberLimit: limits.members,
+      photoUploadsEnabled: isR2Configured(),
+    };
   }),
 
   update: protectedProcedure

@@ -4,6 +4,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useState } from "react";
 import { useForm, type FieldError } from "react-hook-form";
 import { z } from "zod";
+import { PhotoField } from "@/components/members/PhotoField";
 import { MemberRelationships } from "@/components/relationships/MemberRelationships";
 import { Spinner } from "@/components/ui/Spinner";
 import {
@@ -32,8 +33,8 @@ const memberFormSchema = z.object({
   deathDate: z.string().optional(),
   living: z.boolean(),
   birthPlace: z.string().trim().max(200, tooLong(200)),
-  occupation: z.string().trim().max(200, tooLong(200)),
   bio: z.string().trim().max(2000, tooLong(2000)),
+  photoUrl: z.string().nullable(),
 });
 type MemberFormValues = z.infer<typeof memberFormSchema>;
 
@@ -45,8 +46,8 @@ function toFormValues(member?: Member): MemberFormValues {
     deathDate: toDateInputValue(member?.deathDate ?? null),
     living: !member?.deathDate,
     birthPlace: member?.birthPlace ?? "",
-    occupation: member?.occupation ?? "",
     bio: member?.bio ?? "",
+    photoUrl: member?.photoUrl ?? null,
   };
 }
 
@@ -70,6 +71,8 @@ function Field({
 
 interface MemberPanelProps {
   treeId: string;
+  /** Whether the server has picture storage configured. */
+  photoUploadsEnabled: boolean;
   /** The member to edit; omit to add a new one. */
   member?: Member;
   members: Member[];
@@ -80,6 +83,7 @@ interface MemberPanelProps {
 
 export function MemberPanel({
   treeId,
+  photoUploadsEnabled,
   member,
   members,
   canEdit,
@@ -88,6 +92,7 @@ export function MemberPanel({
 }: MemberPanelProps) {
   const utils = trpc.useUtils();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
 
   const form = useForm<MemberFormValues>({
     resolver: zodResolver(memberFormSchema),
@@ -133,8 +138,8 @@ export function MemberPanel({
         birthDate: birthDate ? fromDateInputValue(birthDate) : null,
         deathDate: death ? fromDateInputValue(death) : null,
         birthPlace: values.birthPlace || null,
-        occupation: values.occupation || null,
         bio: values.bio || null,
+        photoUrl: values.photoUrl,
       });
     } else {
       addMember.mutate({
@@ -144,13 +149,15 @@ export function MemberPanel({
         birthDate: birthDate ? fromDateInputValue(birthDate) : undefined,
         deathDate: death ? fromDateInputValue(death) : undefined,
         birthPlace: values.birthPlace || undefined,
-        occupation: values.occupation || undefined,
         bio: values.bio || undefined,
+        photoUrl: values.photoUrl ?? undefined,
       });
     }
   };
 
   const saving = addMember.isPending || updateMember.isPending;
+  const photoUrl = form.watch("photoUrl");
+  const [firstName, lastName] = form.watch(["firstName", "lastName"]);
   const saveError = addMember.error ?? updateMember.error;
 
   return (
@@ -166,6 +173,17 @@ export function MemberPanel({
 
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4" noValidate>
         <fieldset disabled={!canEdit} className="space-y-4">
+          {(photoUploadsEnabled || photoUrl) && (
+            <PhotoField
+              treeId={treeId}
+              firstName={firstName}
+              lastName={lastName}
+              value={photoUrl}
+              onChange={(url) => form.setValue("photoUrl", url, { shouldDirty: true })}
+              onUploadingChange={setUploadingPhoto}
+              canEdit={canEdit && photoUploadsEnabled}
+            />
+          )}
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="First name" error={errors.firstName}>
               <input {...form.register("firstName")} className={inputClass} />
@@ -196,14 +214,9 @@ export function MemberPanel({
             />
             Living
           </label>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Birth place" error={errors.birthPlace}>
-              <input {...form.register("birthPlace")} className={inputClass} />
-            </Field>
-            <Field label="Occupation" error={errors.occupation}>
-              <input {...form.register("occupation")} className={inputClass} />
-            </Field>
-          </div>
+          <Field label="Birth place" error={errors.birthPlace}>
+            <input {...form.register("birthPlace")} className={inputClass} />
+          </Field>
           <Field label="Bio" error={errors.bio}>
             <textarea {...form.register("bio")} rows={4} className={inputClass} />
           </Field>
@@ -217,7 +230,7 @@ export function MemberPanel({
 
         {canEdit && (
           <div className="flex flex-wrap items-center gap-2">
-            <button type="submit" disabled={saving} className={primaryButton}>
+            <button type="submit" disabled={saving || uploadingPhoto} className={primaryButton}>
               {saving && <Spinner />}
               {member ? "Save changes" : "Add member"}
             </button>

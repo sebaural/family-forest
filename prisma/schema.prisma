@@ -141,7 +141,6 @@ model Member {
   birthDate  DateTime?
   deathDate  DateTime?
   birthPlace String?
-  occupation String?
   bio        String?   @db.Text
   photoUrl   String?
   userId     String?

@@ -38,7 +38,7 @@ export function TreeWorkspace({ treeId }: { treeId: string }) {
     return <p className={`px-4 py-8 ${mutedText}`}>Loading tree…</p>;
   }
 
-  const { name, role, memberLimit } = tree.data;
+  const { name, role, memberLimit, photoUploadsEnabled } = tree.data;
   const memberCount = tree.data.members.length;
   const canEdit = role !== "VIEWER";
   const isOwner = role === "OWNER";
@@ -122,6 +122,7 @@ export function TreeWorkspace({ treeId }: { treeId: string }) {
             <MemberPanel
               key={selected.id}
               treeId={treeId}
+              photoUploadsEnabled={photoUploadsEnabled}
               member={selected}
               members={members}
               canEdit={canEdit}
@@ -148,6 +149,7 @@ export function TreeWorkspace({ treeId }: { treeId: string }) {
         ) : (
           <MemberPanel
             treeId={treeId}
+            photoUploadsEnabled={photoUploadsEnabled}
             members={members}
             canEdit
             onClose={() => setAdding(false)}

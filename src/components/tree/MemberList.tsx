@@ -10,7 +10,19 @@ function isTypingTarget(target: EventTarget | null): boolean {
   return target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
 }
 
-function MemberAvatar({ member }: { member: Member }) {
+const AVATAR_SIZES = {
+  sm: "h-9 w-9 text-xs",
+  lg: "h-20 w-20 text-xl",
+} as const;
+
+export function MemberAvatar({
+  member,
+  size = "sm",
+}: {
+  member: Pick<Member, "firstName" | "lastName" | "photoUrl">;
+  size?: keyof typeof AVATAR_SIZES;
+}) {
+  const sizeClass = AVATAR_SIZES[size];
   if (member.photoUrl) {
     return (
       // eslint-disable-next-line @next/next/no-img-element -- photo hosts aren't known up front
@@ -18,14 +30,14 @@ function MemberAvatar({ member }: { member: Member }) {
         src={member.photoUrl}
         alt=""
         referrerPolicy="no-referrer"
-        className="h-9 w-9 shrink-0 rounded-full object-cover"
+        className={`${sizeClass} shrink-0 rounded-full object-cover`}
       />
     );
   }
   return (
     <span
       aria-hidden
-      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-xs font-semibold text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200"
+      className={`flex ${sizeClass} shrink-0 items-center justify-center rounded-full bg-emerald-100 font-semibold text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200`}
     >
       {memberInitials(member)}
     </span>
