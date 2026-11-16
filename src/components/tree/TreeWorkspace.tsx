@@ -12,10 +12,17 @@ import { KebabMenu } from "@/components/ui/KebabMenu";
 import { errorText, mutedText, primaryButton, secondaryButton } from "@/components/ui/styles";
 import { useTreeEvents } from "@/hooks/useTreeEvents";
 import { useTreeMembers } from "@/hooks/useTreeMembers";
+import type { RealtimeClientConfig } from "@/lib/tree-events";
 import { getErrorMessage } from "@/lib/trpc-error";
 import { trpc } from "@/trpc/client";
 
-export function TreeWorkspace({ treeId }: { treeId: string }) {
+export function TreeWorkspace({
+  treeId,
+  realtime,
+}: {
+  treeId: string;
+  realtime: RealtimeClientConfig | null;
+}) {
   const router = useRouter();
   const tree = trpc.trees.get.useQuery({ treeId });
   const { members, isLoading, isLoadingMore, error, refetch } = useTreeMembers(treeId);
@@ -24,7 +31,7 @@ export function TreeWorkspace({ treeId }: { treeId: string }) {
   const [adding, setAdding] = useState(false);
   const [treeDialog, setTreeDialog] = useState<"rename" | "delete" | "share" | null>(null);
 
-  useTreeEvents(treeId);
+  useTreeEvents(treeId, realtime);
 
   // Access can be revoked (or the tree deleted) while the workspace is open.
   const lostAccess = tree.error?.data?.code === "NOT_FOUND";

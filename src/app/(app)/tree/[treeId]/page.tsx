@@ -1,6 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { redirect } from "next/navigation";
 import { TreeWorkspace } from "@/components/tree/TreeWorkspace";
+import { getRealtimeClientConfig } from "@/lib/realtime";
 import { serverClient } from "@/trpc/server";
 
 export default async function TreePage({ params }: { params: { treeId: string } }) {
@@ -14,5 +15,5 @@ export default async function TreePage({ params }: { params: { treeId: string } 
     throw error;
   }
 
-  return <TreeWorkspace treeId={params.treeId} />;
+  return <TreeWorkspace treeId={params.treeId} realtime={getRealtimeClientConfig()} />;
 }

@@ -19,13 +19,16 @@ export const env = createEnv({
     // Resend (invite emails). Without it, invites are shared by copying the link.
     RESEND_API_KEY: z.string().optional(),
     RESEND_FROM: z.string().optional(),
-    // Supabase Realtime (live updates for collaborators). Server-only secret key broadcasts events; never NEXT_PUBLIC_.
+    // Supabase Realtime (live updates for collaborators), named as the Supabase dashboard
+    // lists them for server use. All three are server variables: the secret key broadcasts
+    // events and must never be NEXT_PUBLIC_. The URL and publishable key reach the browser
+    // as props from the tree page (see getRealtimeClientConfig), not through the bundle.
+    SUPABASE_URL: z.url().optional(),
+    SUPABASE_PUBLISHABLE_KEY: z.string().startsWith("sb_publishable_").optional(),
     SUPABASE_SECRET_KEY: z.string().startsWith("sb_secret_").optional(),
   },
   client: {
     NEXT_PUBLIC_APP_URL: z.url(),
-    NEXT_PUBLIC_SUPABASE_URL: z.url().optional(),
-    NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: z.string().startsWith("sb_publishable_").optional(),
   },
   runtimeEnv: {
     DATABASE_URL: process.env.DATABASE_URL,
@@ -42,9 +45,9 @@ export const env = createEnv({
     R2_PUBLIC_URL: process.env.R2_PUBLIC_URL,
     RESEND_API_KEY: process.env.RESEND_API_KEY,
     RESEND_FROM: process.env.RESEND_FROM,
+    SUPABASE_URL: process.env.SUPABASE_URL,
+    SUPABASE_PUBLISHABLE_KEY: process.env.SUPABASE_PUBLISHABLE_KEY,
     SUPABASE_SECRET_KEY: process.env.SUPABASE_SECRET_KEY,
-    NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
-    NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
     NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
   },
   // Escape hatch for builds without real secrets (set SKIP_ENV_VALIDATION=1).
@@ -53,3 +56,28 @@ export const env = createEnv({
     !!process.env.SKIP_ENV_VALIDATION || process.env.npm_lifecycle_event === "lint",
   emptyStringAsUndefined: true,
 });
+
+/** True for a legacy Supabase service_role JWT (header.payload.signature). */
+function isServiceRoleJwt(value: string): boolean {
+  const parts = value.split(".");
+  if (parts.length !== 3 || !parts[1]) return false;
+  try {
+    const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8")) as unknown;
+    return typeof payload === "object" && payload !== null && "role" in payload && payload.role === "service_role";
+  } catch {
+    return false;
+  }
+}
+
+// NEXT_PUBLIC_ values are inlined into browser code, so a secret there is public.
+// Fail startup and builds if one holds a Supabase secret key. Names only the variable.
+if (typeof window === "undefined" && !process.env.SKIP_ENV_VALIDATION) {
+  for (const [name, value] of Object.entries(process.env)) {
+    if (!name.startsWith("NEXT_PUBLIC_") || !value) continue;
+    if (value.trim().startsWith("sb_secret_") || isServiceRoleJwt(value.trim())) {
+      throw new Error(
+        `${name} holds a Supabase secret key. Secret keys must never use a NEXT_PUBLIC_ variable; use SUPABASE_SECRET_KEY.`,
+      );
+    }
+  }
+}

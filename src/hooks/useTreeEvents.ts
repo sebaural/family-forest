@@ -2,36 +2,39 @@
 
 import { createClient, type RealtimeChannel, type SupabaseClient } from "@supabase/supabase-js";
 import { useEffect } from "react";
-import { env } from "@/env";
-import { treeChannelName } from "@/lib/tree-events";
+import { treeChannelName, type RealtimeClientConfig } from "@/lib/tree-events";
 import { trpc } from "@/trpc/client";
 
 const MAX_BACKOFF_MS = 30_000;
 
-let browserClient: SupabaseClient | null | undefined;
-function getBrowserClient(): SupabaseClient | null {
-  if (browserClient === undefined) {
-    browserClient =
-      env.NEXT_PUBLIC_SUPABASE_URL && env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
-        ? createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY, {
-            auth: { persistSession: false, autoRefreshToken: false },
-          })
-        : null;
+// One client per page load, reused across workspaces with the same settings.
+let browserClient: { key: string; client: SupabaseClient } | undefined;
+function getBrowserClient(url: string, publishableKey: string): SupabaseClient {
+  const key = `${url}|${publishableKey}`;
+  if (browserClient?.key !== key) {
+    browserClient = {
+      key,
+      client: createClient(url, publishableKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      }),
+    };
   }
-  return browserClient;
+  return browserClient.client;
 }
 
 /**
  * Keeps an open workspace in sync with collaborators' changes. Events carry no
  * data; they only tell the client which queries to refetch through tRPC.
- * Does nothing when Supabase Realtime isn't configured.
+ * Does nothing when Supabase Realtime isn't configured (config is null).
  */
-export function useTreeEvents(treeId: string) {
+export function useTreeEvents(treeId: string, config: RealtimeClientConfig | null) {
   const utils = trpc.useUtils();
+  const url = config?.url;
+  const publishableKey = config?.publishableKey;
 
   useEffect(() => {
-    const supabase = getBrowserClient();
-    if (!supabase) return;
+    if (!url || !publishableKey) return;
+    const supabase = getBrowserClient(url, publishableKey);
 
     const refreshMembers = () => {
       void utils.members.list.invalidate({ treeId });
@@ -83,5 +86,5 @@ export function useTreeEvents(treeId: string) {
       clearTimeout(retryTimer);
       if (channel) void supabase.removeChannel(channel);
     };
-  }, [treeId, utils]);
+  }, [treeId, utils, url, publishableKey]);
 }
