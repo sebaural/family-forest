@@ -36,7 +36,10 @@ export function MemberRelationships({
   const utils = trpc.useUtils();
   const relationships = trpc.relationships.list.useQuery({ treeId });
   const removeRelationship = trpc.relationships.remove.useMutation({
-    onSuccess: () => utils.relationships.list.invalidate({ treeId }),
+    onSuccess: () => {
+      void utils.relationships.list.invalidate({ treeId });
+      void utils.activity.list.invalidate({ treeId });
+    },
   });
 
   const own = (relationships.data ?? []).filter(

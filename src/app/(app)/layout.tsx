@@ -2,10 +2,12 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth, signOut } from "@/lib/auth";
 import { secondaryButton } from "@/components/ui/styles";
+import { sessionExpiredPath, userExists } from "@/server/session";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const session = await auth();
   if (!session?.user) redirect("/auth/sign-in");
+  if (!(await userExists(session.user.id))) redirect(sessionExpiredPath());
 
   return (
     <div className="flex min-h-dvh flex-col">

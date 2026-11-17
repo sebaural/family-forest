@@ -18,3 +18,33 @@ body {
   color: var(--foreground);
   background: var(--background);
 }
+
+/* Tree canvas: edge colours by relationship type. */
+:root {
+  --accent: #0f766e;
+  --green: #16a34a;
+  --amber: #d97706;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --accent: #2dd4bf;
+    --green: #4ade80;
+    --amber: #fbbf24;
+  }
+}
+
+/* Nodes glide to new layout positions; not while dragging, which must follow the pointer. */
+.react-flow__node:not(.dragging) {
+  transition: transform 300ms ease;
+}
+
+/* Spouse/partner labels appear only while the edge is hovered. */
+.ff-edge-label {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms;
+}
+.react-flow__edge:hover .ff-edge-label {
+  opacity: 1;
+}

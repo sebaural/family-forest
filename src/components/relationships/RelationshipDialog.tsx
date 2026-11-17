@@ -37,6 +37,7 @@ function RelationshipForm({
   const addRelationship = trpc.relationships.add.useMutation({
     onSuccess: () => {
       void utils.relationships.list.invalidate({ treeId });
+      void utils.activity.list.invalidate({ treeId });
       onClose();
     },
   });

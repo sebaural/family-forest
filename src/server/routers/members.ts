@@ -5,6 +5,7 @@ import { PHOTO_MAX_BYTES, PHOTO_TYPES, type PhotoContentType } from "@/lib/photo
 import { getPlanLimits } from "@/lib/plan-limits";
 import { broadcastTreeEvent } from "@/lib/realtime";
 import { createPhotoUploadUrl, deletePhotoByUrl, treePhotoPrefix } from "@/lib/r2";
+import { actorLabel, logActivity, memberLabel } from "@/server/activity";
 import { assertTreeAccess } from "@/server/access";
 import { protectedProcedure, router } from "@/server/trpc";
 
@@ -37,7 +38,7 @@ function toDate(value: string | null | undefined) {
 async function getMemberRef(memberId: string) {
   const member = await db.member.findUnique({
     where: { id: memberId },
-    select: { treeId: true, photoUrl: true },
+    select: { treeId: true, photoUrl: true, firstName: true, lastName: true },
   });
   if (!member) throw new TRPCError({ code: "NOT_FOUND", message: "Member not found" });
   return member;
@@ -54,9 +55,22 @@ function assertTreePhoto(treeId: string, photoUrl: string | null | undefined) {
 
 export const membersRouter = router({
   add: protectedProcedure
-    .input(memberInput.extend({ treeId: z.cuid() }))
+    .input(
+      memberInput.extend({
+        treeId: z.cuid(),
+        /** Links the new member to an existing one in the same transaction. */
+        link: z
+          .object({
+            memberId: z.cuid(),
+            /** What the new member is to memberId. */
+            as: z.enum(["PARENT", "CHILD", "SPOUSE", "PARTNER"]),
+          })
+          .optional(),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
-      const { ownerId } = await assertTreeAccess(input.treeId, ctx.session.user.id, "EDITOR");
+      const userId = ctx.session.user.id;
+      const { ownerId } = await assertTreeAccess(input.treeId, userId, "EDITOR");
 
       // The member cap follows the tree owner's plan, not the editor's.
       const [limits, count] = await Promise.all([
@@ -72,9 +86,37 @@ export const membersRouter = router({
 
       assertTreePhoto(input.treeId, input.photoUrl);
 
-      const { birthDate, deathDate, ...rest } = input;
-      const created = await db.member.create({
-        data: { ...rest, birthDate: toDate(birthDate), deathDate: toDate(deathDate) },
+      const target = input.link
+        ? await db.member.findFirst({
+            where: { id: input.link.memberId, treeId: input.treeId },
+            select: { id: true, firstName: true, lastName: true },
+          })
+        : null;
+      if (input.link && !target) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Member not found" });
+      }
+
+      const actor = await actorLabel(userId);
+      const { birthDate, deathDate, link, ...rest } = input;
+      const created = await db.$transaction(async (tx) => {
+        const member = await tx.member.create({
+          data: { ...rest, birthDate: toDate(birthDate), deathDate: toDate(deathDate) },
+        });
+        let description = `${actor} added ${memberLabel(member, true)}`;
+        if (link && target) {
+          // A brand-new member has no relatives yet, so no cycle or duplicate is possible.
+          const [fromId, toId, type] =
+            link.as === "PARENT"
+              ? [member.id, target.id, "PARENT_CHILD" as const]
+              : link.as === "CHILD"
+                ? [target.id, member.id, "PARENT_CHILD" as const]
+                : [member.id, target.id, link.as];
+          await tx.relationship.create({ data: { treeId: input.treeId, fromId, toId, type } });
+          const relation = { PARENT: "parent", CHILD: "child", SPOUSE: "spouse", PARTNER: "partner" }[link.as];
+          description += ` as ${relation} of ${memberLabel(target)}`;
+        }
+        await logActivity(tx, { treeId: input.treeId, actorId: userId, action: "MEMBER_ADDED", description });
+        return member;
       });
       await broadcastTreeEvent(input.treeId, "members_changed");
       return created;
@@ -94,10 +136,23 @@ export const membersRouter = router({
       await assertTreeAccess(existing.treeId, ctx.session.user.id, "EDITOR");
       assertTreePhoto(existing.treeId, input.photoUrl);
 
+      const actor = await actorLabel(ctx.session.user.id);
       const { memberId, birthDate, deathDate, ...rest } = input;
-      const updated = await db.member.update({
-        where: { id: memberId },
-        data: { ...rest, birthDate: toDate(birthDate), deathDate: toDate(deathDate) },
+      const updated = await db.$transaction(async (tx) => {
+        const member = await tx.member.update({
+          where: { id: memberId },
+          data: { ...rest, birthDate: toDate(birthDate), deathDate: toDate(deathDate) },
+        });
+        const renamed = memberLabel(existing) !== memberLabel(member);
+        await logActivity(tx, {
+          treeId: existing.treeId,
+          actorId: ctx.session.user.id,
+          action: "MEMBER_UPDATED",
+          description: renamed
+            ? `${actor} updated ${memberLabel(existing)} (now ${memberLabel(member)})`
+            : `${actor} updated ${memberLabel(member)}`,
+        });
+        return member;
       });
       // A replaced or cleared picture is no longer referenced.
       if (input.photoUrl !== undefined && existing.photoUrl !== updated.photoUrl) {
@@ -112,8 +167,17 @@ export const membersRouter = router({
     .mutation(async ({ ctx, input }) => {
       const existing = await getMemberRef(input.memberId);
       await assertTreeAccess(existing.treeId, ctx.session.user.id, "EDITOR");
+      const actor = await actorLabel(ctx.session.user.id);
       // Relationships referencing this member cascade.
-      await db.member.delete({ where: { id: input.memberId } });
+      await db.$transaction(async (tx) => {
+        await tx.member.delete({ where: { id: input.memberId } });
+        await logActivity(tx, {
+          treeId: existing.treeId,
+          actorId: ctx.session.user.id,
+          action: "MEMBER_DELETED",
+          description: `${actor} removed ${memberLabel(existing)}`,
+        });
+      });
       await deletePhotoByUrl(existing.photoUrl);
       await broadcastTreeEvent(existing.treeId, "members_changed");
       return { id: input.memberId };

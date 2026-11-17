@@ -1,20 +1,61 @@
 "use client";
 
+import { ReactFlowProvider } from "@xyflow/react";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
-import { MemberPanel } from "@/components/members/MemberPanel";
+import { useCallback, useEffect, useState } from "react";
+import { ActivityPanel } from "@/components/activity/ActivityPanel";
+import { DeleteMemberDialog } from "@/components/members/DeleteMemberDialog";
+import { MemberPanel, type MemberLink } from "@/components/members/MemberPanel";
 import { PlanLimitBanner } from "@/components/PlanLimitBanner";
 import { ShareDialog } from "@/components/share/ShareDialog";
 import { MemberList } from "@/components/tree/MemberList";
+import { TreeCanvas } from "@/components/tree-canvas/TreeCanvas";
 import { DeleteTreeDialog, RenameTreeDialog } from "@/components/trees/TreeDialogs";
 import { Dialog } from "@/components/ui/Dialog";
 import { KebabMenu } from "@/components/ui/KebabMenu";
 import { errorText, mutedText, primaryButton, secondaryButton } from "@/components/ui/styles";
 import { useTreeEvents } from "@/hooks/useTreeEvents";
 import { useTreeMembers } from "@/hooks/useTreeMembers";
+import { memberFullName } from "@/lib/member-format";
 import type { RealtimeClientConfig } from "@/lib/tree-events";
 import { getErrorMessage } from "@/lib/trpc-error";
 import { trpc } from "@/trpc/client";
+import type { Member } from "@/trpc/types";
+
+type WorkspaceView = "list" | "graph";
+const viewKey = (treeId: string) => `ff:view:${treeId}`;
+
+/** List | Graph, remembered per tree in localStorage. */
+function useWorkspaceView(treeId: string) {
+  const [view, setViewState] = useState<WorkspaceView>("list");
+  // Read after mount: the server render can't know the stored value.
+  useEffect(() => {
+    try {
+      if (window.localStorage.getItem(viewKey(treeId)) === "graph") setViewState("graph");
+    } catch {
+      // Storage can be blocked (private mode); the list view is the fallback.
+    }
+  }, [treeId]);
+  const setView = useCallback(
+    (next: WorkspaceView) => {
+      setViewState(next);
+      try {
+        window.localStorage.setItem(viewKey(treeId), next);
+      } catch {
+        // Not persisted; the toggle still works for this visit.
+      }
+    },
+    [treeId],
+  );
+  return [view, setView] as const;
+}
+
+const segmentButton = (active: boolean) =>
+  `px-3 py-1.5 text-sm font-medium ${
+    active
+      ? "bg-emerald-700 text-white"
+      : "bg-transparent hover:bg-gray-100 dark:hover:bg-gray-800"
+  }`;
 
 export function TreeWorkspace({
   treeId,
@@ -29,6 +70,10 @@ export function TreeWorkspace({
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [addLink, setAddLink] = useState<MemberLink | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Member | null>(null);
+  const [activityOpen, setActivityOpen] = useState(false);
+  const [view, setView] = useWorkspaceView(treeId);
   const [treeDialog, setTreeDialog] = useState<"rename" | "delete" | "share" | null>(null);
 
   useTreeEvents(treeId, realtime);
@@ -78,6 +123,15 @@ export function TreeWorkspace({
     </button>
   );
 
+  const switchView = (next: WorkspaceView) => {
+    setSelectedId(null);
+    setView(next);
+  };
+  const closeAdd = () => {
+    setAdding(false);
+    setAddLink(null);
+  };
+
   return (
     <div className="flex h-[calc(100dvh-3.5rem)] flex-col">
       <header className="flex shrink-0 items-center justify-between gap-3 border-b border-gray-200 px-4 py-3 dark:border-gray-800">
@@ -90,8 +144,33 @@ export function TreeWorkspace({
             {role === "VIEWER" && " · View only"}
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <div
+            role="group"
+            aria-label="View"
+            className="flex overflow-hidden rounded border border-gray-300 dark:border-gray-700"
+          >
+            <button
+              type="button"
+              aria-pressed={view === "list"}
+              onClick={() => switchView("list")}
+              className={segmentButton(view === "list")}
+            >
+              List
+            </button>
+            <button
+              type="button"
+              aria-pressed={view === "graph"}
+              onClick={() => switchView("graph")}
+              className={segmentButton(view === "graph")}
+            >
+              Graph
+            </button>
+          </div>
           <div className="hidden md:block">{addMemberButton}</div>
+          <button type="button" onClick={() => setActivityOpen(true)} className={secondaryButton}>
+            Activity
+          </button>
           <button type="button" onClick={() => setTreeDialog("share")} className={secondaryButton}>
             Share
           </button>
@@ -107,40 +186,91 @@ export function TreeWorkspace({
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1">
-        <aside className="flex w-full min-w-0 flex-col gap-3 p-4 md:w-80 md:shrink-0 md:border-r md:border-gray-200 md:dark:border-gray-800">
+      {view === "graph" ? (
+        <div className="flex min-h-0 flex-1 flex-col">
           {canEdit && (
-            <PlanLimitBanner current={memberCount} limit={memberLimit} resource="members" />
-          )}
-          {addMemberButton}
-          {isLoading && <p className={mutedText}>Loading members…</p>}
-          {error && (
-            <div className="space-y-2">
-              <p role="alert" className={errorText}>
-                {getErrorMessage(error)}
-              </p>
-              <button type="button" onClick={() => refetch()} className={secondaryButton}>
-                Try again
-              </button>
+            <div className="shrink-0 px-4 pt-3 empty:hidden">
+              <PlanLimitBanner current={memberCount} limit={memberLimit} resource="members" />
             </div>
           )}
-          {!isLoading && !error && members.length === 0 ? (
-            <p className={mutedText}>No members yet.</p>
-          ) : (
-            <MemberList members={members} selectedId={selectedId} onSelect={setSelectedId} />
-          )}
-          {isLoadingMore && !isLoading && <p className={mutedText}>Loading more members…</p>}
-        </aside>
+          <ReactFlowProvider>
+            <TreeCanvas
+              treeId={treeId}
+              canEdit={canEdit}
+              addMemberButton={addMemberButton}
+              onOpenMember={(member) => setSelectedId(member.id)}
+              onEdit={(member) => setSelectedId(member.id)}
+              onAddRelative={(member, as) => {
+                setAddLink({ member, as });
+                setAdding(true);
+              }}
+              onDelete={setDeleteTarget}
+            />
+          </ReactFlowProvider>
+        </div>
+      ) : (
+        <div className="flex min-h-0 flex-1">
+          <aside className="flex w-full min-w-0 flex-col gap-3 p-4 md:w-80 md:shrink-0 md:border-r md:border-gray-200 md:dark:border-gray-800">
+            {canEdit && (
+              <PlanLimitBanner current={memberCount} limit={memberLimit} resource="members" />
+            )}
+            {addMemberButton}
+            {isLoading && <p className={mutedText}>Loading members…</p>}
+            {error && (
+              <div className="space-y-2">
+                <p role="alert" className={errorText}>
+                  {getErrorMessage(error)}
+                </p>
+                <button type="button" onClick={() => refetch()} className={secondaryButton}>
+                  Try again
+                </button>
+              </div>
+            )}
+            {!isLoading && !error && members.length === 0 ? (
+              <p className={mutedText}>No members yet.</p>
+            ) : (
+              <MemberList members={members} selectedId={selectedId} onSelect={setSelectedId} />
+            )}
+            {isLoadingMore && !isLoading && <p className={mutedText}>Loading more members…</p>}
+          </aside>
 
-        {/* On mobile the list fills the screen and the detail panel overlays it. */}
-        <main
-          className={
-            selected
-              ? "fixed inset-0 z-20 overflow-y-auto bg-background p-4 md:static md:z-auto md:flex-1 md:p-6"
-              : "hidden flex-1 items-center justify-center p-6 md:flex"
-          }
+          {/* On mobile the list fills the screen and the detail panel overlays it. */}
+          <main
+            className={
+              selected
+                ? "fixed inset-0 z-20 overflow-y-auto bg-background p-4 md:static md:z-auto md:flex-1 md:p-6"
+                : "hidden flex-1 items-center justify-center p-6 md:flex"
+            }
+          >
+            {selected ? (
+              <MemberPanel
+                key={selected.id}
+                treeId={treeId}
+                photoUploadsEnabled={photoUploadsEnabled}
+                member={selected}
+                members={members}
+                canEdit={canEdit}
+                onClose={() => setSelectedId(null)}
+              />
+            ) : (
+              <p className={mutedText}>
+                {members.length > 0
+                  ? "Select a member to see their details."
+                  : "Your family members will appear here."}
+              </p>
+            )}
+          </main>
+        </div>
+      )}
+
+      {view === "graph" && (
+        <Dialog
+          open={selected !== null}
+          onClose={() => setSelectedId(null)}
+          title={selected ? memberFullName(selected) : "Member"}
+          variant="drawer"
         >
-          {selected ? (
+          {selected && (
             <MemberPanel
               key={selected.id}
               treeId={treeId}
@@ -150,21 +280,20 @@ export function TreeWorkspace({
               canEdit={canEdit}
               onClose={() => setSelectedId(null)}
             />
-          ) : (
-            <p className={mutedText}>
-              {members.length > 0
-                ? "Select a member to see their details."
-                : "Your family members will appear here."}
-            </p>
           )}
-        </main>
-      </div>
+        </Dialog>
+      )}
 
-      <Dialog open={adding} onClose={() => setAdding(false)} title="Add member" variant="drawer">
+      <Dialog
+        open={adding}
+        onClose={closeAdd}
+        title={addLink ? `Add a relative of ${memberFullName(addLink.member)}` : "Add member"}
+        variant="drawer"
+      >
         {atLimit ? (
           <div className="space-y-4">
             <PlanLimitBanner current={memberCount} limit={memberLimit} resource="members" />
-            <button type="button" onClick={() => setAdding(false)} className={secondaryButton}>
+            <button type="button" onClick={closeAdd} className={secondaryButton}>
               Close
             </button>
           </div>
@@ -174,14 +303,33 @@ export function TreeWorkspace({
             photoUploadsEnabled={photoUploadsEnabled}
             members={members}
             canEdit
-            onClose={() => setAdding(false)}
+            link={addLink ?? undefined}
+            onClose={closeAdd}
             onAdded={(memberId) => {
-              setAdding(false);
-              setSelectedId(memberId);
+              closeAdd();
+              // The list view opens the new member; the graph shows it in place.
+              if (view === "list") setSelectedId(memberId);
             }}
           />
         )}
       </Dialog>
+
+      <Dialog
+        open={activityOpen}
+        onClose={() => setActivityOpen(false)}
+        title="Activity"
+        variant="drawer"
+      >
+        <ActivityPanel treeId={treeId} onClose={() => setActivityOpen(false)} />
+      </Dialog>
+
+      {canEdit && (
+        <DeleteMemberDialog
+          treeId={treeId}
+          member={deleteTarget}
+          onClose={() => setDeleteTarget(null)}
+        />
+      )}
 
       <ShareDialog
         tree={tree.data}

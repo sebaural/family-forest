@@ -106,6 +106,21 @@ function MemberDetails({ member }: { member: Member }) {
   );
 }
 
+export type MemberLinkKind = "PARENT" | "CHILD" | "SPOUSE" | "PARTNER";
+
+/** Adds the new member as a relative of an existing one (from the canvas menu). */
+export interface MemberLink {
+  member: Member;
+  as: MemberLinkKind;
+}
+
+const LINK_TEXT: Record<MemberLinkKind, string> = {
+  PARENT: "parent",
+  CHILD: "child",
+  SPOUSE: "spouse",
+  PARTNER: "partner",
+};
+
 interface MemberPanelProps {
   treeId: string;
   /** Whether the server has picture storage configured. */
@@ -116,6 +131,8 @@ interface MemberPanelProps {
   canEdit: boolean;
   onClose: () => void;
   onAdded?: (memberId: string) => void;
+  /** Only when adding: link the new member to this one. */
+  link?: MemberLink;
 }
 
 export function MemberPanel({
@@ -126,10 +143,14 @@ export function MemberPanel({
   canEdit,
   onClose,
   onAdded,
+  link,
 }: MemberPanelProps) {
   const utils = trpc.useUtils();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  // "Add spouse / partner" lets the user pick which of the two.
+  const [linkAs, setLinkAs] = useState<MemberLinkKind | undefined>(link?.as);
+  const couple = linkAs === "SPOUSE" || linkAs === "PARTNER";
 
   const form = useForm<MemberFormValues>({
     resolver: zodResolver(memberFormSchema),
@@ -145,11 +166,13 @@ export function MemberPanel({
     void utils.members.list.invalidate({ treeId });
     void utils.trees.get.invalidate({ treeId });
     void utils.trees.list.invalidate();
+    void utils.activity.list.invalidate({ treeId });
   };
 
   const addMember = trpc.members.add.useMutation({
     onSuccess: (created) => {
       invalidate();
+      if (link) void utils.relationships.list.invalidate({ treeId });
       onAdded?.(created.id);
     },
   });
@@ -188,6 +211,7 @@ export function MemberPanel({
         birthPlace: values.birthPlace || undefined,
         bio: values.bio || undefined,
         photoUrl: values.photoUrl ?? undefined,
+        link: link && linkAs ? { memberId: link.member.id, as: linkAs } : undefined,
       });
     }
   };
@@ -212,6 +236,28 @@ export function MemberPanel({
         <MemberDetails member={member} />
       ) : (
         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4" noValidate>
+          {!member && link && linkAs && (
+            <div className="rounded bg-emerald-50 px-3 py-2 text-sm text-emerald-900 dark:bg-emerald-950 dark:text-emerald-100">
+              {couple ? (
+                <label className="flex flex-wrap items-center gap-2">
+                  <span>Will be added as</span>
+                  <select
+                    value={linkAs}
+                    onChange={(event) => setLinkAs(event.target.value as MemberLinkKind)}
+                    className="rounded border border-emerald-300 bg-white px-2 py-1 text-gray-900 dark:border-emerald-800 dark:bg-gray-900 dark:text-gray-100"
+                  >
+                    <option value="SPOUSE">spouse</option>
+                    <option value="PARTNER">partner</option>
+                  </select>
+                  <span>of {memberFullName(link.member)}</span>
+                </label>
+              ) : (
+                <p>
+                  Will be added as {LINK_TEXT[linkAs]} of {memberFullName(link.member)}
+                </p>
+              )}
+            </div>
+          )}
           <fieldset disabled={!canEdit} className="space-y-4">
             {(photoUploadsEnabled || photoUrl) && (
               <PhotoField

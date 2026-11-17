@@ -5,7 +5,7 @@ import { SignInForm } from "@/app/auth/sign-in/sign-in-form";
 import { configuredOAuthProviders } from "@/lib/auth.config";
 
 type SignInPageProps = {
-  searchParams: { callbackUrl?: string; registered?: string };
+  searchParams: { callbackUrl?: string; registered?: string; expired?: string };
 };
 
 export default function SignInPage({ searchParams }: SignInPageProps) {
@@ -16,6 +16,12 @@ export default function SignInPage({ searchParams }: SignInPageProps) {
       {searchParams.registered && (
         <p className="rounded bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
           Account created. Please sign in.
+        </p>
+      )}
+
+      {searchParams.expired && (
+        <p className="rounded bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          Your session has expired. Please sign in again.
         </p>
       )}
 

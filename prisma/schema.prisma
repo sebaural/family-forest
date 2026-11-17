@@ -28,8 +28,9 @@ model User {
   subscription   Subscription?
   collaborations TreeCollaborator[]
 
-  invitationsSent     Invitation[] @relation("invitationsSent")
-  invitationsAccepted Invitation[] @relation("invitationsAccepted")
+  invitationsSent     Invitation[]  @relation("invitationsSent")
+  invitationsAccepted Invitation[]  @relation("invitationsAccepted")
+  activity            ActivityLog[]
 }
 
 enum UserRole {
@@ -86,6 +87,7 @@ model FamilyTree {
   members       Member[]
   relationships Relationship[]
   invitations   Invitation[]
+  activity      ActivityLog[]
 }
 
 // ── Collaborators ─────────────────────────────────────────────────────────
@@ -198,4 +200,20 @@ model Invitation {
 
   @@index([email])
   @@index([treeId])
+}
+
+// Who changed what in a tree. The description is a snapshot ("Alice added Jane
+// Doe (1942–2018)"), so entries stay readable after members or users are deleted.
+model ActivityLog {
+  id          String   @id @default(cuid())
+  treeId      String
+  actorId     String? // null once the acting user is deleted
+  action      String // MEMBER_ADDED, MEMBER_UPDATED, MEMBER_DELETED, RELATIONSHIP_ADDED, RELATIONSHIP_REMOVED
+  description String
+  createdAt   DateTime @default(now())
+
+  tree  FamilyTree @relation(fields: [treeId], references: [id], onDelete: Cascade)
+  actor User?      @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([treeId, createdAt(sort: Desc)])
 }

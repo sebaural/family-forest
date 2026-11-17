@@ -41,6 +41,7 @@ export function useTreeEvents(treeId: string, config: RealtimeClientConfig | nul
       void utils.relationships.list.invalidate({ treeId });
       void utils.trees.get.invalidate({ treeId });
       void utils.trees.list.invalidate();
+      void utils.activity.list.invalidate({ treeId });
     };
     const refreshAccess = () => {
       void utils.trees.get.invalidate({ treeId });
