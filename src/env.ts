@@ -16,6 +16,8 @@ export const env = createEnv({
     R2_SECRET_ACCESS_KEY: z.string().optional(),
     R2_BUCKET: z.string().optional(),
     R2_PUBLIC_URL: z.url().optional(),
+    // Vercel Cron sends it as a Bearer token; cron routes refuse to run without it.
+    CRON_SECRET: z.string().min(16).optional(),
     // Resend (invite emails). Without it, invites are shared by copying the link.
     RESEND_API_KEY: z.string().optional(),
     RESEND_FROM: z.string().optional(),
@@ -43,6 +45,7 @@ export const env = createEnv({
     R2_SECRET_ACCESS_KEY: process.env.R2_SECRET_ACCESS_KEY,
     R2_BUCKET: process.env.R2_BUCKET,
     R2_PUBLIC_URL: process.env.R2_PUBLIC_URL,
+    CRON_SECRET: process.env.CRON_SECRET,
     RESEND_API_KEY: process.env.RESEND_API_KEY,
     RESEND_FROM: process.env.RESEND_FROM,
     SUPABASE_URL: process.env.SUPABASE_URL,

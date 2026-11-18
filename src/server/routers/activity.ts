@@ -6,9 +6,9 @@ import { protectedProcedure, router } from "@/server/trpc";
 export const ACTIVITY_LIMIT = 50;
 
 export const activityRouter = router({
-  /** The 50 newest entries, newest first. Every role can read them. */
+  /** The 50 newest entries, newest first. Only the tree owner can read them. */
   list: protectedProcedure.input(z.object({ treeId: z.cuid() })).query(async ({ ctx, input }) => {
-    await assertTreeAccess(input.treeId, ctx.session.user.id);
+    await assertTreeAccess(input.treeId, ctx.session.user.id, "OWNER");
     const entries = await db.activityLog.findMany({
       where: { treeId: input.treeId },
       orderBy: { createdAt: "desc" },

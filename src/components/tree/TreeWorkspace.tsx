@@ -168,9 +168,11 @@ export function TreeWorkspace({
             </button>
           </div>
           <div className="hidden md:block">{addMemberButton}</div>
-          <button type="button" onClick={() => setActivityOpen(true)} className={secondaryButton}>
-            Activity
-          </button>
+          {isOwner && (
+            <button type="button" onClick={() => setActivityOpen(true)} className={secondaryButton}>
+              Activity
+            </button>
+          )}
           <button type="button" onClick={() => setTreeDialog("share")} className={secondaryButton}>
             Share
           </button>
@@ -314,14 +316,16 @@ export function TreeWorkspace({
         )}
       </Dialog>
 
-      <Dialog
-        open={activityOpen}
-        onClose={() => setActivityOpen(false)}
-        title="Activity"
-        variant="drawer"
-      >
-        <ActivityPanel treeId={treeId} onClose={() => setActivityOpen(false)} />
-      </Dialog>
+      {isOwner && (
+        <Dialog
+          open={activityOpen}
+          onClose={() => setActivityOpen(false)}
+          title="Activity"
+          variant="drawer"
+        >
+          <ActivityPanel treeId={treeId} onClose={() => setActivityOpen(false)} />
+        </Dialog>
+      )}
 
       {canEdit && (
         <DeleteMemberDialog

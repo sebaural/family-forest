@@ -113,7 +113,7 @@ export function MemberRelationships({
       {canEdit && (
         <RelationshipDialog
           treeId={treeId}
-          member={member}
+          subject={{ kind: "saved", member }}
           candidates={others}
           open={dialogOpen}
           onClose={() => setDialogOpen(false)}

@@ -31,7 +31,10 @@ export function Dialog({ open, onClose, title, variant = "modal", children }: Di
   return (
     <dialog
       ref={ref}
-      onClose={onClose}
+      // React propagates a nested dialog's close event up to this one; ignore it.
+      onClose={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
       aria-labelledby={titleId}
       className={`bg-background p-6 text-foreground shadow-xl backdrop:bg-black/50 dark:border dark:border-gray-700 ${variants[variant]}`}
     >

@@ -2,7 +2,7 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { getPlanLimits } from "@/lib/plan-limits";
-import { isR2Configured } from "@/lib/r2";
+import { deleteTreePhotos, isR2Configured } from "@/lib/r2";
 import { broadcastTreeEvent } from "@/lib/realtime";
 import { assertTreeAccess } from "@/server/access";
 import { protectedProcedure, router } from "@/server/trpc";
@@ -99,6 +99,8 @@ export const treesRouter = router({
     await assertTreeAccess(input.treeId, ctx.session.user.id, "OWNER");
     // Members, relationships, invitations and collaborators cascade.
     await db.familyTree.delete({ where: { id: input.treeId } });
+    // Pictures live in R2, outside the cascade.
+    await deleteTreePhotos(input.treeId);
     // Collaborators' open workspaces refetch, get NOT_FOUND and leave.
     await broadcastTreeEvent(input.treeId, "access_changed");
     return { id: input.treeId };

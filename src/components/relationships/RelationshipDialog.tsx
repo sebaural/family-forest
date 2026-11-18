@@ -11,25 +11,32 @@ import {
   secondaryButton,
 } from "@/components/ui/styles";
 import { memberFullName } from "@/lib/member-format";
+import {
+  RELATIVE_KINDS,
+  RELATIVE_LABEL,
+  RELATIVE_NOUN,
+  relativeEdge,
+  type RelativeKind,
+} from "@/lib/relationship-kind";
 import { getErrorMessage } from "@/lib/trpc-error";
 import { trpc } from "@/trpc/client";
-import type { Member, Relationship } from "@/trpc/types";
+import type { Member } from "@/trpc/types";
 
-type Direction = "parent" | "child";
+/** The subject of the dialog: a saved member, or one still being added. */
+type Subject = { kind: "saved"; member: Member } | { kind: "pending"; name: string };
 
-function RelationshipForm({
-  treeId,
-  member,
-  candidates,
-  onClose,
-}: {
+interface RelationshipFormProps {
   treeId: string;
-  member: Member;
+  subject: Subject;
   candidates: Member[];
   onClose: () => void;
-}) {
-  const [type, setType] = useState<Relationship["type"]>("PARENT_CHILD");
-  const [direction, setDirection] = useState<Direction>("parent");
+  /** Pending mode: hand the choice back instead of saving it. */
+  onPick?: (kind: RelativeKind, relative: Member) => void;
+}
+
+function RelationshipForm({ treeId, subject, candidates, onClose, onPick }: RelationshipFormProps) {
+  // No default: the user picks the role explicitly.
+  const [kind, setKind] = useState<RelativeKind | "">("");
   const [targetId, setTargetId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
 
@@ -48,19 +55,19 @@ function RelationshipForm({
     return candidates.filter((other) => memberFullName(other).toLowerCase().includes(q));
   }, [candidates, search]);
 
-  const name = memberFullName(member);
+  const name = subject.kind === "saved" ? memberFullName(subject.member) : subject.name;
+  const target = candidates.find((other) => other.id === targetId) ?? null;
 
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
-    if (!targetId) return;
-    // A PARENT_CHILD edge always runs parent → child.
-    const memberIsTo = type === "PARENT_CHILD" && direction === "child";
-    addRelationship.mutate({
-      treeId,
-      type,
-      fromId: memberIsTo ? targetId : member.id,
-      toId: memberIsTo ? member.id : targetId,
-    });
+    if (!kind || !target) return;
+    if (subject.kind === "pending") {
+      onPick?.(kind, target);
+      onClose();
+      return;
+    }
+    // "target is the member's <kind>", stored as a directed edge.
+    addRelationship.mutate({ treeId, ...relativeEdge(kind, subject.member.id, target.id) });
   };
 
   return (
@@ -68,38 +75,25 @@ function RelationshipForm({
       <label className="block space-y-1">
         <span className="text-sm font-medium">Relationship</span>
         <select
-          value={type}
+          required
+          value={kind}
           onChange={(event) => {
-            setType(event.target.value as Relationship["type"]);
+            setKind(event.target.value as RelativeKind);
             addRelationship.reset();
           }}
           className={inputClass}
         >
-          <option value="PARENT_CHILD">Parent / child</option>
-          <option value="SPOUSE">Spouse</option>
-          <option value="PARTNER">Partner</option>
-        </select>
-      </label>
-
-      {type === "PARENT_CHILD" && (
-        <fieldset className="space-y-1">
-          <legend className="text-sm font-medium">Direction</legend>
-          {(["parent", "child"] as const).map((value) => (
-            <label key={value} className="flex items-center gap-2 text-sm">
-              <input
-                type="radio"
-                name="direction"
-                checked={direction === value}
-                onChange={() => {
-                  setDirection(value);
-                  addRelationship.reset();
-                }}
-              />
-              {name} is a {value} of…
-            </label>
+          <option value="" disabled>
+            Choose a relationship…
+          </option>
+          {RELATIVE_KINDS.map((value) => (
+            <option key={value} value={value}>
+              {RELATIVE_LABEL[value]}
+            </option>
           ))}
-        </fieldset>
-      )}
+        </select>
+        <span className={`block ${mutedText}`}>The selected family member&apos;s role toward {name}.</span>
+      </label>
 
       <div className="space-y-1">
         <label className="block space-y-1">
@@ -137,6 +131,13 @@ function RelationshipForm({
         </ul>
       </div>
 
+      {kind && target && (
+        <p role="status" className="rounded bg-emerald-50 px-3 py-2 text-sm text-emerald-900 dark:bg-emerald-950 dark:text-emerald-100">
+          <strong>{memberFullName(target)}</strong> will be added as <strong>{name}</strong>&apos;s{" "}
+          {RELATIVE_NOUN[kind]}.
+        </p>
+      )}
+
       {addRelationship.error && (
         <p role="alert" className={errorText}>
           {getErrorMessage(addRelationship.error)}
@@ -149,7 +150,7 @@ function RelationshipForm({
         </button>
         <button
           type="submit"
-          disabled={!targetId || addRelationship.isPending}
+          disabled={!kind || !target || addRelationship.isPending}
           className={primaryButton}
         >
           {addRelationship.isPending && <Spinner />}
@@ -161,21 +162,12 @@ function RelationshipForm({
 }
 
 export function RelationshipDialog({
-  treeId,
-  member,
-  candidates,
   open,
-  onClose,
-}: {
-  treeId: string;
-  member: Member;
-  candidates: Member[];
-  open: boolean;
-  onClose: () => void;
-}) {
+  ...props
+}: RelationshipFormProps & { open: boolean }) {
   return (
-    <Dialog open={open} onClose={onClose} title="Add relationship">
-      <RelationshipForm treeId={treeId} member={member} candidates={candidates} onClose={onClose} />
+    <Dialog open={open} onClose={props.onClose} title="Add relationship">
+      <RelationshipForm {...props} />
     </Dialog>
   );
 }

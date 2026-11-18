@@ -1,12 +1,13 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useForm, type FieldError } from "react-hook-form";
 import { z } from "zod";
 import { format } from "date-fns";
 import { PhotoField } from "@/components/members/PhotoField";
 import { MemberRelationships } from "@/components/relationships/MemberRelationships";
+import { RelationshipDialog } from "@/components/relationships/RelationshipDialog";
 import { MemberAvatar } from "@/components/tree/MemberList";
 import { Spinner } from "@/components/ui/Spinner";
 import {
@@ -22,6 +23,11 @@ import {
   memberFullName,
   toDateInputValue,
 } from "@/lib/member-format";
+import {
+  inverseKind,
+  RELATIVE_LABEL,
+  type RelativeKind,
+} from "@/lib/relationship-kind";
 import { getErrorMessage } from "@/lib/trpc-error";
 import { trpc } from "@/trpc/client";
 import type { Member } from "@/trpc/types";
@@ -106,7 +112,14 @@ function MemberDetails({ member }: { member: Member }) {
   );
 }
 
-export type MemberLinkKind = "PARENT" | "CHILD" | "SPOUSE" | "PARTNER";
+/** What the new member will be to an existing one. */
+export type MemberLinkKind = RelativeKind;
+
+/** A relationship queued in the Add member form: `member` is the new member's `kind`. */
+interface PendingLink {
+  kind: RelativeKind;
+  member: Member;
+}
 
 /** Adds the new member as a relative of an existing one (from the canvas menu). */
 export interface MemberLink {
@@ -151,6 +164,9 @@ export function MemberPanel({
   // "Add spouse / partner" lets the user pick which of the two.
   const [linkAs, setLinkAs] = useState<MemberLinkKind | undefined>(link?.as);
   const couple = linkAs === "SPOUSE" || linkAs === "PARTNER";
+  const [pending, setPending] = useState<PendingLink[]>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const formId = useId();
 
   const form = useForm<MemberFormValues>({
     resolver: zodResolver(memberFormSchema),
@@ -172,7 +188,7 @@ export function MemberPanel({
   const addMember = trpc.members.add.useMutation({
     onSuccess: (created) => {
       invalidate();
-      if (link) void utils.relationships.list.invalidate({ treeId });
+      if (link || pending.length) void utils.relationships.list.invalidate({ treeId });
       onAdded?.(created.id);
     },
   });
@@ -211,7 +227,11 @@ export function MemberPanel({
         birthPlace: values.birthPlace || undefined,
         bio: values.bio || undefined,
         photoUrl: values.photoUrl ?? undefined,
-        link: link && linkAs ? { memberId: link.member.id, as: linkAs } : undefined,
+        links: [
+          ...(link && linkAs ? [{ memberId: link.member.id, as: linkAs }] : []),
+          // A queued "P is the new member's parent" means the new member is P's child.
+          ...pending.map((entry) => ({ memberId: entry.member.id, as: inverseKind(entry.kind) })),
+        ],
       });
     }
   };
@@ -220,6 +240,34 @@ export function MemberPanel({
   const photoUrl = form.watch("photoUrl");
   const [firstName, lastName] = form.watch(["firstName", "lastName"]);
   const saveError = addMember.error ?? updateMember.error;
+  const newName = memberFullName({ firstName, lastName }).trim() || "this member";
+  // Each existing member can be linked once; the canvas link already uses one.
+  const linkedIds = new Set([link?.member.id, ...pending.map((entry) => entry.member.id)]);
+  const candidates = members.filter((other) => !linkedIds.has(other.id));
+
+  const actions = canEdit && (
+    <div className="flex flex-wrap items-center gap-2">
+      <button
+        type="submit"
+        form={formId}
+        disabled={saving || uploadingPhoto}
+        className={primaryButton}
+      >
+        {saving && <Spinner />}
+        {member ? "Save changes" : "Add member"}
+      </button>
+      {!member && (
+        <button type="button" onClick={onClose} className={secondaryButton}>
+          Cancel
+        </button>
+      )}
+      {member && updateMember.isSuccess && (
+        <span role="status" className={mutedText}>
+          Saved
+        </span>
+      )}
+    </div>
+  );
 
   return (
     <div className="mx-auto w-full max-w-2xl space-y-8">
@@ -235,7 +283,7 @@ export function MemberPanel({
       {!canEdit && member ? (
         <MemberDetails member={member} />
       ) : (
-        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4" noValidate>
+        <form id={formId} onSubmit={form.handleSubmit(onSubmit)} className="space-y-4" noValidate>
           {!member && link && linkAs && (
             <div className="rounded bg-emerald-50 px-3 py-2 text-sm text-emerald-900 dark:bg-emerald-950 dark:text-emerald-100">
               {couple ? (
@@ -314,25 +362,66 @@ export function MemberPanel({
             </p>
           )}
 
-          {canEdit && (
-            <div className="flex flex-wrap items-center gap-2">
-              <button type="submit" disabled={saving || uploadingPhoto} className={primaryButton}>
-                {saving && <Spinner />}
-                {member ? "Save changes" : "Add member"}
-              </button>
-              {!member && (
-                <button type="button" onClick={onClose} className={secondaryButton}>
-                  Cancel
-                </button>
-              )}
-              {member && updateMember.isSuccess && (
-                <span role="status" className={mutedText}>
-                  Saved
-                </span>
-              )}
-            </div>
-          )}
+          {member && actions}
         </form>
+      )}
+
+      {!member && canEdit && (
+        <>
+          <section className="space-y-3 border-t border-gray-200 pt-6 dark:border-gray-800">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="font-semibold">Relationships</h3>
+              <span title={candidates.length === 0 ? "No other members to link." : undefined}>
+                <button
+                  type="button"
+                  disabled={candidates.length === 0}
+                  onClick={() => setPickerOpen(true)}
+                  className={secondaryButton}
+                >
+                  Add Relationship
+                </button>
+              </span>
+            </div>
+            {pending.length === 0 ? (
+              <p className={mutedText}>No relationships yet.</p>
+            ) : (
+              <ul className="space-y-1">
+                {pending.map((entry) => (
+                  <li
+                    key={entry.member.id}
+                    className="flex items-center justify-between gap-3 rounded px-2 py-1 text-sm hover:bg-gray-50 dark:hover:bg-gray-900"
+                  >
+                    <span className="min-w-0 truncate">
+                      <span className={mutedText}>{RELATIVE_LABEL[entry.kind]}:</span>{" "}
+                      {memberFullName(entry.member)}
+                    </span>
+                    <button
+                      type="button"
+                      aria-label={`Remove relationship with ${memberFullName(entry.member)}`}
+                      onClick={() =>
+                        setPending((list) => list.filter((other) => other.member.id !== entry.member.id))
+                      }
+                      className="px-2 text-gray-500 hover:text-red-600"
+                    >
+                      ×
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <RelationshipDialog
+              treeId={treeId}
+              subject={{ kind: "pending", name: newName }}
+              candidates={candidates}
+              open={pickerOpen}
+              onClose={() => setPickerOpen(false)}
+              onPick={(kind, relative) =>
+                setPending((list) => [...list, { kind, member: relative }])
+              }
+            />
+          </section>
+          {actions}
+        </>
       )}
 
       {member && (

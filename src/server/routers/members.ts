@@ -7,7 +7,13 @@ import { broadcastTreeEvent } from "@/lib/realtime";
 import { createPhotoUploadUrl, deletePhotoByUrl, treePhotoPrefix } from "@/lib/r2";
 import { actorLabel, logActivity, memberLabel } from "@/server/activity";
 import { assertTreeAccess } from "@/server/access";
+import { wouldCreateCycle } from "@/server/relationship-graph";
 import { protectedProcedure, router } from "@/server/trpc";
+import { RELATIVE_NOUN, relativeEdge } from "@/lib/relationship-kind";
+import { CYCLE_ERROR_MESSAGE } from "@/lib/trpc-error";
+
+/** Most relationships a new member can be created with. */
+const MAX_LINKS = 20;
 
 const memberInput = z.object({
   firstName: z.string().trim().min(1).max(100),
@@ -58,13 +64,16 @@ export const membersRouter = router({
     .input(
       memberInput.extend({
         treeId: z.cuid(),
-        /** Links the new member to an existing one in the same transaction. */
-        link: z
-          .object({
-            memberId: z.cuid(),
-            /** What the new member is to memberId. */
-            as: z.enum(["PARENT", "CHILD", "SPOUSE", "PARTNER"]),
-          })
+        /** Links the new member to existing ones in the same transaction. */
+        links: z
+          .array(
+            z.object({
+              memberId: z.cuid(),
+              /** What the new member is to memberId. */
+              as: z.enum(["PARENT", "CHILD", "SPOUSE", "PARTNER"]),
+            }),
+          )
+          .max(MAX_LINKS)
           .optional(),
       }),
     )
@@ -86,35 +95,61 @@ export const membersRouter = router({
 
       assertTreePhoto(input.treeId, input.photoUrl);
 
-      const target = input.link
-        ? await db.member.findFirst({
-            where: { id: input.link.memberId, treeId: input.treeId },
+      const links = input.links ?? [];
+      if (new Set(links.map((link) => link.memberId)).size !== links.length) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Each family member can only be linked once",
+        });
+      }
+      const targets = links.length
+        ? await db.member.findMany({
+            where: { id: { in: links.map((link) => link.memberId) }, treeId: input.treeId },
             select: { id: true, firstName: true, lastName: true },
           })
-        : null;
-      if (input.link && !target) {
+        : [];
+      if (targets.length !== links.length) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Member not found" });
+      }
+      const targetById = new Map(targets.map((target) => [target.id, target]));
+
+      // The new member sits between its parents and its children, so a child that is
+      // already an ancestor of one of its parents would close a loop.
+      const parentIds = links.filter((link) => link.as === "CHILD").map((link) => link.memberId);
+      const childIds = links.filter((link) => link.as === "PARENT").map((link) => link.memberId);
+      for (const parentId of parentIds) {
+        for (const childId of childIds) {
+          if (await wouldCreateCycle(input.treeId, parentId, childId)) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: CYCLE_ERROR_MESSAGE });
+          }
+        }
       }
 
       const actor = await actorLabel(userId);
-      const { birthDate, deathDate, link, ...rest } = input;
+      const { treeId, firstName, lastName, birthPlace, bio, photoUrl, birthDate, deathDate } = input;
       const created = await db.$transaction(async (tx) => {
         const member = await tx.member.create({
-          data: { ...rest, birthDate: toDate(birthDate), deathDate: toDate(deathDate) },
+          data: {
+            treeId,
+            firstName,
+            lastName,
+            birthPlace,
+            bio,
+            photoUrl,
+            birthDate: toDate(birthDate),
+            deathDate: toDate(deathDate),
+          },
         });
         let description = `${actor} added ${memberLabel(member, true)}`;
-        if (link && target) {
-          // A brand-new member has no relatives yet, so no cycle or duplicate is possible.
-          const [fromId, toId, type] =
-            link.as === "PARENT"
-              ? [member.id, target.id, "PARENT_CHILD" as const]
-              : link.as === "CHILD"
-                ? [target.id, member.id, "PARENT_CHILD" as const]
-                : [member.id, target.id, link.as];
-          await tx.relationship.create({ data: { treeId: input.treeId, fromId, toId, type } });
-          const relation = { PARENT: "parent", CHILD: "child", SPOUSE: "spouse", PARTNER: "partner" }[link.as];
-          description += ` as ${relation} of ${memberLabel(target)}`;
+        const phrases: string[] = [];
+        for (const link of links) {
+          const target = targetById.get(link.memberId)!;
+          // "The new member is link.as of target" = "target's relative is the new member".
+          const edge = relativeEdge(link.as, target.id, member.id);
+          await tx.relationship.create({ data: { treeId: input.treeId, ...edge } });
+          phrases.push(`${RELATIVE_NOUN[link.as]} of ${memberLabel(target)}`);
         }
+        if (phrases.length) description += ` as ${phrases.join(", ")}`;
         await logActivity(tx, { treeId: input.treeId, actorId: userId, action: "MEMBER_ADDED", description });
         return member;
       });

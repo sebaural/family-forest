@@ -6,34 +6,8 @@ import { CYCLE_ERROR_MESSAGE } from "@/lib/trpc-error";
 import { broadcastTreeEvent } from "@/lib/realtime";
 import { actorLabel, logActivity, RELATIONSHIP_NOUN, relationshipPhrase } from "@/server/activity";
 import { assertTreeAccess } from "@/server/access";
+import { wouldCreateCycle } from "@/server/relationship-graph";
 import { protectedProcedure, router } from "@/server/trpc";
-
-/**
- * A new PARENT_CHILD edge fromId → toId (parent → child) closes a loop when
- * toId is already an ancestor of fromId. Walks up fromId's parents breadth-first,
- * one query per generation, scoped to the tree.
- */
-async function wouldCreateCycle(treeId: string, fromId: string, toId: string): Promise<boolean> {
-  const seen = new Set<string>([fromId]);
-  let frontier = [fromId];
-
-  while (frontier.length > 0) {
-    const parents = await db.relationship.findMany({
-      where: { treeId, type: "PARENT_CHILD", toId: { in: frontier } },
-      select: { fromId: true },
-    });
-    const next: string[] = [];
-    for (const { fromId: parentId } of parents) {
-      if (parentId === toId) return true;
-      if (!seen.has(parentId)) {
-        seen.add(parentId);
-        next.push(parentId);
-      }
-    }
-    frontier = next;
-  }
-  return false;
-}
 
 export const relationshipsRouter = router({
   add: protectedProcedure
