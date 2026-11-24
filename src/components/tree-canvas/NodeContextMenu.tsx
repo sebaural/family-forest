@@ -18,8 +18,9 @@ interface NodeContextMenuProps extends NodeMenuActions {
   onClose: () => void;
 }
 
+// The highlighted background plus an inset ring marks the focused item.
 const itemClass =
-  "block w-full px-3 py-1.5 text-left text-sm hover:bg-gray-100 focus:bg-gray-100 focus:outline-none dark:hover:bg-gray-800 dark:focus:bg-gray-800";
+  "block w-full px-3 py-1.5 text-left text-sm hover:bg-gray-100 focus:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-600 dark:hover:bg-gray-800 dark:focus:bg-gray-800";
 
 /** Right-click menu for a member node (OWNER/EDITOR only). Esc or an outside click closes it. */
 export function NodeContextMenu({
@@ -51,7 +52,29 @@ export function NodeContextMenu({
       if (!ref.current?.contains(event.target as Node)) onClose();
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") {
+        onClose();
+        return;
+      }
+      // Arrow keys, Home and End move between items, as in a native menu.
+      const items = Array.from(ref.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? []);
+      const index = items.indexOf(document.activeElement as HTMLButtonElement);
+      const next =
+        event.key === "ArrowDown"
+          ? items[(index + 1) % items.length]
+          : event.key === "ArrowUp"
+            ? items[(index - 1 + items.length) % items.length]
+            : event.key === "Home"
+              ? items[0]
+              : event.key === "End"
+                ? items[items.length - 1]
+                : undefined;
+      if (next) {
+        event.preventDefault();
+        next.focus();
+      } else if (event.key === "Tab") {
+        onClose();
+      }
     };
     document.addEventListener("pointerdown", onPointerDown, true);
     document.addEventListener("keydown", onKeyDown);
@@ -87,7 +110,7 @@ export function NodeContextMenu({
       <button type="button" role="menuitem" className={itemClass} onClick={run(() => onAddRelative(member, "SPOUSE"))}>
         Add spouse / partner
       </button>
-      <div className="my-1 border-t border-gray-200 dark:border-gray-700" />
+      <div role="separator" className="my-1 border-t border-gray-200 dark:border-gray-700" />
       <button
         type="button"
         role="menuitem"

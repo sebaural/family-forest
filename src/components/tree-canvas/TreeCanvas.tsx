@@ -51,7 +51,7 @@ export function TreeCanvas({
   const graph = useTreeGraph(treeId);
   const { fitView } = useReactFlow();
   const [nodes, setNodes, onNodesChange] = useNodesState<MemberNodeType>([]);
-  const [menu, setMenu] = useState<{ member: Member; x: number; y: number } | null>(null);
+  const [menu, setMenu] = useState<{ member: Member; x: number; y: number; returnFocus?: HTMLElement } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const fitted = useRef(false);
 
@@ -72,6 +72,34 @@ export function TreeCanvas({
   }, [graph.nodes, setNodes, fitView]);
 
   const closeMenu = useCallback(() => setMenu(null), []);
+
+  /**
+   * Keyboard access for focused nodes (Tab moves between them): Enter opens the
+   * member, Delete asks to delete them, and the Menu key or Shift+F10 opens the
+   * context menu. React Flow's own delete key is off, so nothing is removed
+   * without the confirmation dialog.
+   */
+  const onKeyDown = useCallback(
+    (event: React.KeyboardEvent) => {
+      const element = (event.target as HTMLElement).closest<HTMLElement>(".react-flow__node");
+      const id = element?.dataset.id;
+      const member = id ? nodes.find((node) => node.id === id)?.data.member : undefined;
+      if (!element || !member) return;
+
+      if (event.key === "Enter") {
+        event.preventDefault();
+        onOpenMember(member);
+      } else if (canEdit && (event.key === "Delete" || event.key === "Backspace")) {
+        event.preventDefault();
+        menuActions.onDelete(member);
+      } else if (canEdit && (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10"))) {
+        event.preventDefault();
+        const rect = element.getBoundingClientRect();
+        setMenu({ member, x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, returnFocus: element });
+      }
+    },
+    [nodes, canEdit, onOpenMember, menuActions],
+  );
 
   if (graph.error) {
     return (
@@ -98,7 +126,20 @@ export function TreeCanvas({
   }
 
   return (
-    <div ref={containerRef} className="relative min-h-0 flex-1" data-testid="tree-canvas">
+    <div
+      ref={containerRef}
+      role="application"
+      aria-label="Family tree canvas"
+      aria-describedby="tree-canvas-help"
+      className="relative min-h-0 flex-1"
+      data-testid="tree-canvas"
+      onKeyDown={onKeyDown}
+    >
+      <p id="tree-canvas-help" className="sr-only">
+        Press Tab to move between family members. Press Enter to open a member
+        {canEdit ? ", Delete to delete them, or Shift+F10 for more actions" : ""}. Pinch or use the
+        zoom buttons to zoom.
+      </p>
       <ReactFlow
         nodes={nodes}
         edges={graph.edges}
@@ -108,7 +149,11 @@ export function TreeCanvas({
         connectionMode={ConnectionMode.Loose}
         nodesDraggable={canEdit}
         nodesConnectable={false}
+        nodesFocusable
         edgesFocusable={false}
+        deleteKeyCode={null}
+        zoomOnPinch
+        panOnDrag
         fitView
         fitViewOptions={{ padding: 0.2 }}
         minZoom={0.1}
@@ -124,7 +169,11 @@ export function TreeCanvas({
         onMoveStart={closeMenu}
         onPaneClick={closeMenu}
       >
-        <Panel position="top-left" className="!m-2 flex max-w-[calc(100%-1rem)] flex-wrap items-center gap-1.5">
+        {/* Below 640 px the toolbar is a bar along the bottom, clear of the graph's top row. */}
+        <Panel
+          position="top-left"
+          className="!m-2 flex max-w-[calc(100%-1rem)] flex-wrap items-center gap-1.5 max-sm:!inset-x-0 max-sm:!bottom-0 max-sm:!top-auto max-sm:!m-0 max-sm:max-w-none max-sm:justify-center max-sm:border-t max-sm:border-gray-200 max-sm:bg-background/95 max-sm:p-2 max-sm:dark:border-gray-800"
+        >
           {canEdit && (
             <button type="button" className={toolbarButton} onClick={resetLayout}>
               Reset layout
@@ -133,12 +182,21 @@ export function TreeCanvas({
           <ExportButtons containerRef={containerRef} showPdf={canEdit} />
         </Panel>
         <Background />
-        <Controls showInteractive={false} />
+        <Controls showInteractive={false} className="max-sm:!bottom-14" />
         <MiniMap pannable zoomable className="!hidden sm:!block" />
       </ReactFlow>
 
       {menu && canEdit && (
-        <NodeContextMenu {...menu} {...menuActions} onClose={closeMenu} />
+        <NodeContextMenu
+          member={menu.member}
+          x={menu.x}
+          y={menu.y}
+          {...menuActions}
+          onClose={() => {
+            menu.returnFocus?.focus();
+            closeMenu();
+          }}
+        />
       )}
     </div>
   );

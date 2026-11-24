@@ -2,6 +2,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import {
   DeleteObjectCommand,
+  GetObjectCommand,
   ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
@@ -49,19 +50,28 @@ export function treePhotoPrefix(treeId: string): string | null {
   return config && `${config.publicUrl}/trees/${treeId}/`;
 }
 
+/** Public URL prefix of one user's avatar pictures. */
+export function avatarPrefix(userId: string): string | null {
+  const config = getConfig();
+  return config && `${config.publicUrl}/avatars/${userId}/`;
+}
+
 /**
- * Signs a one-off PUT for a new picture. Content type and length are part of the
+ * Signs a one-off PUT for a new picture: a member photo (`trees/<treeId>/`) or a
+ * user avatar (`avatars/<userId>/`). Content type and length are part of the
  * signature, so the browser can't upload a different kind or size of file.
  */
 export async function createPhotoUploadUrl(input: {
-  treeId: string;
+  folder: { treeId: string } | { userId: string };
   contentType: PhotoContentType;
   size: number;
 }): Promise<{ uploadUrl: string; publicUrl: string } | null> {
   const config = getConfig();
   if (!config) return null;
 
-  const key = `trees/${input.treeId}/${randomUUID()}.${PHOTO_TYPES[input.contentType]}`;
+  const folder =
+    "treeId" in input.folder ? `trees/${input.folder.treeId}` : `avatars/${input.folder.userId}`;
+  const key = `${folder}/${randomUUID()}.${PHOTO_TYPES[input.contentType]}`;
   const uploadUrl = await getSignedUrl(
     getClient(config),
     new PutObjectCommand({
@@ -78,12 +88,55 @@ export async function createPhotoUploadUrl(input: {
   return { uploadUrl, publicUrl: `${config.publicUrl}/${key}` };
 }
 
+/** The bucket key behind one of our public picture URLs, or null for any other URL. */
+function keyFromUrl(config: NonNullable<ReturnType<typeof getConfig>>, url: string): string | null {
+  const ours = [`${config.publicUrl}/trees/`, `${config.publicUrl}/avatars/`];
+  return ours.some((prefix) => url.startsWith(prefix)) ? url.slice(config.publicUrl.length + 1) : null;
+}
+
+/** Downloads a picture by its public URL (null when missing or not ours). */
+export async function getPhotoBytes(url: string): Promise<Uint8Array | null> {
+  const config = getConfig();
+  const key = config && keyFromUrl(config, url);
+  if (!config || !key) return null;
+  try {
+    const object = await getClient(config).send(
+      new GetObjectCommand({ Bucket: config.bucket, Key: key }),
+    );
+    return (await object.Body?.transformToByteArray()) ?? null;
+  } catch (error) {
+    console.error("Failed to read picture from R2", key, error);
+    return null;
+  }
+}
+
+/** Stores a processed picture next to the original and returns its public URL. */
+export async function putPhoto(input: {
+  folder: { userId: string };
+  bytes: Uint8Array;
+  contentType: "image/webp";
+}): Promise<string | null> {
+  const config = getConfig();
+  if (!config) return null;
+  const key = `avatars/${input.folder.userId}/${randomUUID()}.webp`;
+  await getClient(config).send(
+    new PutObjectCommand({
+      Bucket: config.bucket,
+      Key: key,
+      Body: input.bytes,
+      ContentType: input.contentType,
+      CacheControl: "public, max-age=31536000, immutable",
+    }),
+  );
+  return `${config.publicUrl}/${key}`;
+}
+
 /** Deletes a picture by its public URL. Best effort: failures are logged, not thrown. */
 export async function deletePhotoByUrl(url: string | null | undefined): Promise<void> {
   const config = getConfig();
-  if (!config || !url || !url.startsWith(`${config.publicUrl}/trees/`)) return;
+  const key = config && url ? keyFromUrl(config, url) : null;
+  if (!config || !key) return;
 
-  const key = url.slice(config.publicUrl.length + 1);
   try {
     await getClient(config).send(new DeleteObjectCommand({ Bucket: config.bucket, Key: key }));
   } catch (error) {
@@ -93,18 +146,29 @@ export async function deletePhotoByUrl(url: string | null | undefined): Promise<
 
 const TREE_PHOTO_DELETE_ATTEMPTS = 3;
 
-/** Lists every key under a prefix, following pagination. */
-async function listKeys(s3: S3Client, bucket: string, prefix: string): Promise<string[]> {
-  const keys: string[] = [];
+export interface StoredObject {
+  key: string;
+  lastModified: Date | null;
+}
+
+/** Lists every object under a prefix, following pagination. */
+async function listObjects(s3: S3Client, bucket: string, prefix: string): Promise<StoredObject[]> {
+  const objects: StoredObject[] = [];
   let token: string | undefined;
   do {
     const page = await s3.send(
       new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, ContinuationToken: token }),
     );
-    for (const { Key } of page.Contents ?? []) if (Key) keys.push(Key);
+    for (const { Key, LastModified } of page.Contents ?? []) {
+      if (Key) objects.push({ key: Key, lastModified: LastModified ?? null });
+    }
     token = page.IsTruncated ? page.NextContinuationToken : undefined;
   } while (token);
-  return keys;
+  return objects;
+}
+
+async function listKeys(s3: S3Client, bucket: string, prefix: string): Promise<string[]> {
+  return (await listObjects(s3, bucket, prefix)).map((object) => object.key);
 }
 
 /**
@@ -112,11 +176,19 @@ async function listKeys(s3: S3Client, bucket: string, prefix: string): Promise<s
  * member. Retries until a fresh listing comes back empty. It doesn't throw:
  * the tree is already gone, so anything left is logged for a manual cleanup.
  */
-export async function deleteTreePhotos(treeId: string): Promise<void> {
+export function deleteTreePhotos(treeId: string): Promise<void> {
+  return deleteFolder(`trees/${treeId}/`);
+}
+
+/** Deletes every avatar picture of a user (account deletion, sweep). */
+export function deleteAvatarFolder(userId: string): Promise<void> {
+  return deleteFolder(`avatars/${userId}/`);
+}
+
+async function deleteFolder(prefix: string): Promise<void> {
   const config = getConfig();
   if (!config) return;
   const s3 = getClient(config);
-  const prefix = `trees/${treeId}/`;
 
   let lastError: unknown;
   // One extra pass only re-lists, to confirm the last round of deletes.
@@ -138,11 +210,20 @@ export async function deleteTreePhotos(treeId: string): Promise<void> {
       lastError = error;
     }
   }
-  console.error("Failed to delete all tree pictures from R2", prefix, lastError);
+  console.error("Failed to delete all pictures from R2", prefix, lastError);
 }
 
 /** Every tree id that has a picture folder (`trees/<treeId>/`) in the bucket. */
-export async function listTreePhotoFolders(): Promise<string[]> {
+export function listTreePhotoFolders(): Promise<string[]> {
+  return listFolders("trees/");
+}
+
+/** Every user id that has an avatar folder (`avatars/<userId>/`) in the bucket. */
+export function listAvatarFolders(): Promise<string[]> {
+  return listFolders("avatars/");
+}
+
+async function listFolders(root: "trees/" | "avatars/"): Promise<string[]> {
   const config = getConfig();
   if (!config) return [];
   const s3 = getClient(config);
@@ -152,16 +233,30 @@ export async function listTreePhotoFolders(): Promise<string[]> {
     const page = await s3.send(
       new ListObjectsV2Command({
         Bucket: config.bucket,
-        Prefix: "trees/",
+        Prefix: root,
         Delimiter: "/",
         ContinuationToken: token,
       }),
     );
     for (const { Prefix } of page.CommonPrefixes ?? []) {
-      const id = Prefix?.slice("trees/".length, -1);
+      const id = Prefix?.slice(root.length, -1);
       if (id) ids.push(id);
     }
     token = page.IsTruncated ? page.NextContinuationToken : undefined;
   } while (token);
   return ids;
+}
+
+/**
+ * The pictures in one folder, with their public URL and upload time, so a sweep
+ * can find uploads nothing points to.
+ */
+export async function listFolderPhotos(
+  folder: { treeId: string } | { userId: string },
+): Promise<{ url: string; key: string; lastModified: Date | null }[]> {
+  const config = getConfig();
+  if (!config) return [];
+  const prefix = "treeId" in folder ? `trees/${folder.treeId}/` : `avatars/${folder.userId}/`;
+  const objects = await listObjects(getClient(config), config.bucket, prefix);
+  return objects.map((object) => ({ ...object, url: `${config.publicUrl}/${object.key}` }));
 }

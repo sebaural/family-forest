@@ -3,6 +3,7 @@
 import { MarkerType, type Edge, type Node } from "@xyflow/react";
 import { useMemo } from "react";
 import { useTreeMembers } from "@/hooks/useTreeMembers";
+import { formatLifeYears, memberFullName } from "@/lib/member-format";
 import { applyDagreLayout, NODE_HEIGHT, NODE_WIDTH } from "@/lib/tree-layout";
 import { trpc } from "@/trpc/client";
 import type { Member, Relationship } from "@/trpc/types";
@@ -46,6 +47,9 @@ export function buildTreeGraph(members: Member[], relationships: Relationship[])
       width: NODE_WIDTH,
       height: NODE_HEIGHT,
       data: { member },
+      ariaLabel: [memberFullName(member), formatLifeYears(member.birthDate, member.deathDate)]
+        .filter(Boolean)
+        .join(", "),
     })),
     parentEdges,
     undefined,

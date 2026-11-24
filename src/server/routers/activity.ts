@@ -18,13 +18,13 @@ export const activityRouter = router({
         action: true,
         description: true,
         createdAt: true,
-        actor: { select: { name: true, email: true, image: true } },
+        actor: { select: { name: true, email: true, image: true, avatarUrl: true } },
       },
     });
     return entries.map(({ actor, ...entry }) => ({
       ...entry,
       actorName: actor ? actor.name?.trim() || actor.email : "Deleted user",
-      actorImage: actor?.image ?? null,
+      actorImage: actor?.avatarUrl ?? actor?.image ?? null,
     }));
   }),
 });

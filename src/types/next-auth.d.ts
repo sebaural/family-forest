@@ -6,6 +6,8 @@ declare module "next-auth" {
     user: {
       id: string;
       role: UserRole;
+      /** UserSession row id; missing on tokens issued before sessions were tracked. */
+      sid?: string;
     } & DefaultSession["user"];
   }
 
@@ -18,5 +20,6 @@ declare module "@auth/core/jwt" {
   interface JWT {
     id?: string;
     role?: UserRole;
+    sid?: string;
   }
 }

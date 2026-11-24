@@ -236,7 +236,11 @@ export const membersRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       await assertTreeAccess(input.treeId, ctx.session.user.id, "EDITOR");
-      const signed = await createPhotoUploadUrl(input);
+      const signed = await createPhotoUploadUrl({
+        folder: { treeId: input.treeId },
+        contentType: input.contentType,
+        size: input.size,
+      });
       if (!signed) {
         throw new TRPCError({
           code: "PRECONDITION_FAILED",

@@ -36,7 +36,7 @@ export function ExportButtons({
   showPdf: boolean;
 }) {
   const { getNodes } = useReactFlow();
-  const plan = trpc.user.plan.useQuery(undefined, { enabled: showPdf });
+  const plan = trpc.users.plan.useQuery(undefined, { enabled: showPdf });
   const [busy, setBusy] = useState<"svg" | "jpeg" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pdfOpen, setPdfOpen] = useState(false);

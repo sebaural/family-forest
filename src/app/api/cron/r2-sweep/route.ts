@@ -1,28 +1,25 @@
-import { timingSafeEqual } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
-import { env } from "@/env";
-import { sweepDeletedTreePhotos } from "@/server/r2-sweep";
+import { rejectCronRequest } from "@/server/cron-auth";
+import { sweepPhotos } from "@/server/r2-sweep";
 
 export const dynamic = "force-dynamic";
 
-function authorized(request: NextRequest): boolean {
-  if (!env.CRON_SECRET) return false;
-  const expected = Buffer.from(`Bearer ${env.CRON_SECRET}`);
-  const actual = Buffer.from(request.headers.get("authorization") ?? "");
-  return actual.length === expected.length && timingSafeEqual(actual, expected);
-}
-
-/** Daily Vercel Cron (vercel.json): deletes pictures left behind by deleted trees. */
+/**
+ * Daily Vercel Cron (vercel.json): deletes pictures left behind by deleted trees
+ * and users, and uploads older than a day that nothing points to.
+ * `?dryRun=1` reports what it would delete, without deleting.
+ */
 export async function GET(request: NextRequest) {
-  if (!env.CRON_SECRET) {
-    return NextResponse.json({ error: "CRON_SECRET is not set" }, { status: 503 });
-  }
-  if (!authorized(request)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  const result = await sweepDeletedTreePhotos();
-  if (result.removed.length > 0) {
-    console.info("R2 sweep removed picture folders of deleted trees", result.removed);
+  const rejected = rejectCronRequest(request);
+  if (rejected) return rejected;
+
+  const dryRun = request.nextUrl.searchParams.get("dryRun") === "1";
+  const result = await sweepPhotos({ dryRun });
+  if (
+    !dryRun &&
+    (result.removedTreeFolders.length > 0 || result.removedAvatarFolders.length > 0 || result.removedPhotos > 0)
+  ) {
+    console.info("R2 sweep removed pictures", result);
   }
   return NextResponse.json(result);
 }

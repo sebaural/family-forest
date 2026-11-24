@@ -18,12 +18,18 @@ model User {
   emailVerified DateTime?
   image         String?
   password      String? // null for OAuth users
+  avatarUrl     String? // uploaded profile picture (R2); falls back to the OAuth image
   role          UserRole  @default(USER)
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+
+  digestEnabled        Boolean  @default(true)
+  inviteAcceptedNotify Boolean  @default(true)
+  onboardingStep       Int      @default(0) // 0 not started, 1 tree named, 2 self added, 3 complete
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 
   accounts       Account[]
   sessions       Session[]
+  userSessions   UserSession[]
   trees          FamilyTree[]
   subscription   Subscription?
   collaborations TreeCollaborator[]
@@ -55,6 +61,21 @@ model Account {
   user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([provider, providerAccountId])
+}
+
+/// One row per signed-in device. The JWT carries its id (`sid`); a revoked or
+/// missing row ends that session on its next request.
+model UserSession {
+  id         String    @id @default(cuid())
+  userId     String
+  userAgent  String?
+  ip         String?
+  createdAt  DateTime  @default(now())
+  lastSeenAt DateTime  @default(now())
+  revokedAt  DateTime?
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 model Session {

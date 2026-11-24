@@ -8,14 +8,21 @@ import { trpc } from "@/trpc/client";
 
 let redirecting = false;
 
+function isUnauthorized(error: unknown): boolean {
+  return (
+    error instanceof TRPCClientError &&
+    (error.data as { code?: string } | undefined)?.code === "UNAUTHORIZED"
+  );
+}
+
 /**
- * UNAUTHORIZED from tRPC means the session is gone or its user was deleted.
- * A full navigation lets /api/session-expired clear the cookie before sign-in.
+ * UNAUTHORIZED from tRPC means the session isn't active: a pre-Phase 6 token
+ * that needs upgrading, or a session that was revoked or whose user is gone.
+ * A full navigation lets /api/session-expired upgrade it and come back here,
+ * or clear the cookie before sign-in.
  */
 function handleUnauthorized(error: unknown) {
-  if (redirecting || !(error instanceof TRPCClientError)) return;
-  const data = error.data as { code?: string } | undefined;
-  if (data?.code !== "UNAUTHORIZED") return;
+  if (redirecting || !isUnauthorized(error)) return;
   redirecting = true;
   const here = window.location.pathname + window.location.search;
   window.location.assign(`/api/session-expired?callbackUrl=${encodeURIComponent(here)}`);
@@ -26,6 +33,12 @@ export function TRPCProvider({ children }: { children: React.ReactNode }) {
     () =>
       new QueryClient({
         queryCache: new QueryCache({ onError: handleUnauthorized }),
+        defaultOptions: {
+          queries: {
+            // Retrying can't fix UNAUTHORIZED; redirect on the first one.
+            retry: (failureCount, error) => !isUnauthorized(error) && failureCount < 3,
+          },
+        },
         mutationCache: new MutationCache({ onError: handleUnauthorized }),
       }),
   );

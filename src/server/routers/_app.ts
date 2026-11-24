@@ -11,7 +11,7 @@ export const appRouter = router({
   trees: treesRouter,
   members: membersRouter,
   relationships: relationshipsRouter,
-  user: userRouter,
+  users: userRouter,
   invitations: invitationsRouter,
 });
 

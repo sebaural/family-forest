@@ -1,9 +1,15 @@
 import { TRPCError } from "@trpc/server";
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { TreeWorkspace } from "@/components/tree/TreeWorkspace";
 import { getRealtimeClientConfig } from "@/lib/realtime";
 import { sessionExpiredPath } from "@/server/session";
 import { serverClient } from "@/trpc/server";
+
+export const metadata: Metadata = {
+  title: "Family tree · FamilyForest",
+  description: "View and edit your family tree with relatives.",
+};
 
 export default async function TreePage({ params }: { params: { treeId: string } }) {
   try {

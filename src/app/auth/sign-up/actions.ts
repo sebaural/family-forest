@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { db } from "@/lib/db";
+import { sendWelcomeEmail } from "@/lib/email";
 
 export type SignUpResult = { success: true } | { error: string };
 
@@ -52,6 +53,9 @@ export async function signUp(
     }
     throw error;
   }
+
+  // Best effort: never fails the sign-up.
+  await sendWelcomeEmail({ to: email, name });
 
   return { success: true };
 }

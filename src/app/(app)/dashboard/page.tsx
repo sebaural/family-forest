@@ -1,6 +1,14 @@
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { TreeDashboard } from "@/components/trees/TreeDashboard";
 import { auth } from "@/lib/auth";
+import { db } from "@/lib/db";
+import { ONBOARDING_COMPLETE } from "@/lib/onboarding";
+
+export const metadata: Metadata = {
+  title: "Your trees · FamilyForest",
+  description: "Your family trees and the trees shared with you.",
+};
 
 export default async function DashboardPage({
   searchParams,
@@ -10,9 +18,20 @@ export default async function DashboardPage({
   const session = await auth();
   if (!session?.user) redirect("/auth/sign-in");
 
+  // New users with no trees at all go through onboarding first. Anyone who
+  // already has a tree (owned or shared) is never interrupted.
+  const userId = session.user.id;
+  const user = await db.user.findUnique({ where: { id: userId }, select: { onboardingStep: true } });
+  if (user && user.onboardingStep < ONBOARDING_COMPLETE) {
+    const trees = await db.familyTree.count({
+      where: { OR: [{ ownerId: userId }, { collaborators: { some: { userId } } }] },
+    });
+    if (trees === 0) redirect("/onboarding");
+  }
+
   return (
     <TreeDashboard
-      userId={session.user.id}
+      userId={userId}
       treeNotFound={searchParams.error === "tree-not-found"}
     />
   );

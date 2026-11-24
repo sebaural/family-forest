@@ -17,7 +17,7 @@ export function TreeDashboard({
 }) {
   const [createOpen, setCreateOpen] = useState(false);
   const trees = trpc.trees.list.useQuery();
-  const plan = trpc.user.plan.useQuery();
+  const plan = trpc.users.plan.useQuery();
 
   // The tree cap counts trees the user owns, not trees shared with them.
   const ownedCount = trees.data?.filter((tree) => tree.ownerId === userId).length ?? 0;

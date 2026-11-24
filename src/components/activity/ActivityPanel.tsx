@@ -71,7 +71,7 @@ export function ActivityPanel({ treeId, onClose }: { treeId: string; onClose: ()
       )}
       {activity.data?.length === 0 && <p className={mutedText}>No changes yet.</p>}
       {activity.data && activity.data.length > 0 && (
-        <ol className="space-y-3" aria-label="Recent activity">
+        <ol className="space-y-3" role="log" aria-live="polite" aria-label="Recent activity">
           {activity.data.map((entry) => (
             <li key={entry.id} className="flex gap-3" data-action={entry.action}>
               <ActorAvatar name={entry.actorName} image={entry.actorImage} />

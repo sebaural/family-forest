@@ -2,7 +2,7 @@ import { Prisma } from "@prisma/client";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { isEmailConfigured, sendInviteEmail } from "@/lib/email";
+import { isEmailConfigured, sendInviteAcceptedEmail, sendInviteEmail } from "@/lib/email";
 import {
   hashToken,
   INVITE_TTL_DAYS,
@@ -116,9 +116,17 @@ export const invitationsRouter = router({
       const [invitation, user] = await Promise.all([
         db.invitation.findUnique({
           where: { tokenHash: hashToken(input.token) },
-          include: { tree: { select: { ownerId: true } } },
+          include: {
+            tree: {
+              select: {
+                ownerId: true,
+                name: true,
+                owner: { select: { email: true, inviteAcceptedNotify: true } },
+              },
+            },
+          },
         }),
-        db.user.findUniqueOrThrow({ where: { id: userId }, select: { email: true } }),
+        db.user.findUniqueOrThrow({ where: { id: userId }, select: { email: true, name: true } }),
       ]);
       if (!invitation || invitation.id !== verified.claims.invitationId) {
         throw new TRPCError({ code: "NOT_FOUND", message: "This invitation is no longer valid" });
@@ -140,7 +148,7 @@ export const invitationsRouter = router({
       }
 
       const limits = await getPlanLimits(invitation.tree.ownerId);
-      await db.$transaction(async (tx) => {
+      const joined = await db.$transaction(async (tx) => {
         // Lock the tree row so concurrent accepts can't both slip under the cap.
         await tx.$queryRaw`SELECT id FROM "FamilyTree" WHERE id = ${invitation.treeId} FOR UPDATE`;
 
@@ -167,9 +175,20 @@ export const invitationsRouter = router({
           where: { id: invitation.id },
           data: { acceptedAt: new Date(), acceptedById: userId },
         });
+        return !existing;
       });
 
       await broadcastTreeEvent(invitation.treeId, "access_changed");
+      // Only the owner sends invitations, so only the owner hears about accepts.
+      if (joined && invitation.tree.owner.inviteAcceptedNotify) {
+        await sendInviteAcceptedEmail({
+          to: invitation.tree.owner.email,
+          collaboratorName: user.name ?? user.email,
+          treeName: invitation.tree.name,
+          treeId: invitation.treeId,
+          role: invitation.role,
+        });
+      }
       return { treeId: invitation.treeId };
     }),
 

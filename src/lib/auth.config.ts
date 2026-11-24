@@ -44,7 +44,10 @@ export const authConfig = {
         nextUrl.pathname === "/dashboard" ||
         nextUrl.pathname.startsWith("/dashboard/") ||
         nextUrl.pathname === "/tree" ||
-        nextUrl.pathname.startsWith("/tree/")
+        nextUrl.pathname.startsWith("/tree/") ||
+        nextUrl.pathname === "/settings" ||
+        nextUrl.pathname.startsWith("/settings/") ||
+        nextUrl.pathname === "/onboarding"
       ) {
         // Returning false redirects to pages.signIn with a callbackUrl.
         return isSignedIn;
@@ -67,6 +70,7 @@ export const authConfig = {
       if (session.user && token.id && token.role) {
         session.user.id = token.id;
         session.user.role = token.role;
+        session.user.sid = token.sid;
       }
       return session;
     },

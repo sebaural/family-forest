@@ -48,3 +48,41 @@ body {
 .react-flow__edge:hover .ff-edge-label {
   opacity: 1;
 }
+
+/* Visible keyboard focus everywhere; components may add a ring of their own. */
+:focus-visible {
+  outline: 2px solid #059669;
+  outline-offset: 2px;
+}
+/* React Flow removes the outline on focused nodes; put one back. */
+.react-flow__node.selectable:focus-visible {
+  outline: 2px solid #059669;
+  outline-offset: 3px;
+  border-radius: 0.5rem;
+}
+
+/* Drawers slide in from the right; below 640 px they're full-screen sheets that slide up. */
+@keyframes ff-slide-in-right {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+@keyframes ff-slide-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+dialog.ff-drawer[open] {
+  animation: ff-slide-in-right 200ms ease-out;
+}
+@media (max-width: 639px) {
+  dialog.ff-drawer[open] {
+    animation: ff-slide-up 220ms ease-out;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  dialog.ff-drawer[open] {
+    animation: none;
+  }
+  .react-flow__node:not(.dragging) {
+    transition: none;
+  }
+}
