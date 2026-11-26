@@ -44,6 +44,13 @@ function getClient(config: NonNullable<ReturnType<typeof getConfig>>): S3Client 
   return client;
 }
 
+/** Where a picture lives: a tree's member photos or one user's avatars. */
+export type PhotoFolder = { treeId: string } | { userId: string };
+
+function folderPath(folder: PhotoFolder): string {
+  return "treeId" in folder ? `trees/${folder.treeId}` : `avatars/${folder.userId}`;
+}
+
 /** Public URL prefix every picture of this tree lives under. */
 export function treePhotoPrefix(treeId: string): string | null {
   const config = getConfig();
@@ -62,16 +69,14 @@ export function avatarPrefix(userId: string): string | null {
  * signature, so the browser can't upload a different kind or size of file.
  */
 export async function createPhotoUploadUrl(input: {
-  folder: { treeId: string } | { userId: string };
+  folder: PhotoFolder;
   contentType: PhotoContentType;
   size: number;
 }): Promise<{ uploadUrl: string; publicUrl: string } | null> {
   const config = getConfig();
   if (!config) return null;
 
-  const folder =
-    "treeId" in input.folder ? `trees/${input.folder.treeId}` : `avatars/${input.folder.userId}`;
-  const key = `${folder}/${randomUUID()}.${PHOTO_TYPES[input.contentType]}`;
+  const key = `${folderPath(input.folder)}/${randomUUID()}.${PHOTO_TYPES[input.contentType]}`;
   const uploadUrl = await getSignedUrl(
     getClient(config),
     new PutObjectCommand({
@@ -112,13 +117,13 @@ export async function getPhotoBytes(url: string): Promise<Uint8Array | null> {
 
 /** Stores a processed picture next to the original and returns its public URL. */
 export async function putPhoto(input: {
-  folder: { userId: string };
+  folder: PhotoFolder;
   bytes: Uint8Array;
   contentType: "image/webp";
 }): Promise<string | null> {
   const config = getConfig();
   if (!config) return null;
-  const key = `avatars/${input.folder.userId}/${randomUUID()}.webp`;
+  const key = `${folderPath(input.folder)}/${randomUUID()}.webp`;
   await getClient(config).send(
     new PutObjectCommand({
       Bucket: config.bucket,

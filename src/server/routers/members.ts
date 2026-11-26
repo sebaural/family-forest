@@ -7,6 +7,7 @@ import { broadcastTreeEvent } from "@/lib/realtime";
 import { createPhotoUploadUrl, deletePhotoByUrl, treePhotoPrefix } from "@/lib/r2";
 import { actorLabel, logActivity, memberLabel } from "@/server/activity";
 import { assertTreeAccess } from "@/server/access";
+import { MEMBER_PHOTO_SIZE, optimisePhoto } from "@/server/photo-optimise";
 import { wouldCreateCycle } from "@/server/relationship-graph";
 import { protectedProcedure, router } from "@/server/trpc";
 import { RELATIVE_NOUN, relativeEdge } from "@/lib/relationship-kind";
@@ -57,6 +58,28 @@ function assertTreePhoto(treeId: string, photoUrl: string | null | undefined) {
   if (!prefix || !photoUrl.startsWith(prefix)) {
     throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid picture URL" });
   }
+}
+
+/**
+ * Resizes a newly uploaded picture to a small WebP (and deletes the original).
+ * A URL some member already uses is kept as is: optimising it would delete
+ * that member's picture.
+ */
+async function optimiseMemberPhoto(treeId: string, photoUrl: string): Promise<string> {
+  const inUse = await db.member.count({ where: { treeId, photoUrl } });
+  if (inUse > 0) return photoUrl;
+  const optimised = await optimisePhoto({
+    folder: { treeId },
+    originalUrl: photoUrl,
+    size: MEMBER_PHOTO_SIZE,
+  });
+  if (!optimised) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "That file couldn't be read as a picture. Try a JPEG, PNG or WebP.",
+    });
+  }
+  return optimised;
 }
 
 export const membersRouter = router({
@@ -126,7 +149,8 @@ export const membersRouter = router({
       }
 
       const actor = await actorLabel(userId);
-      const { treeId, firstName, lastName, birthPlace, bio, photoUrl, birthDate, deathDate } = input;
+      const { treeId, firstName, lastName, birthPlace, bio, birthDate, deathDate } = input;
+      const photoUrl = input.photoUrl && (await optimiseMemberPhoto(treeId, input.photoUrl));
       const created = await db.$transaction(async (tx) => {
         const member = await tx.member.create({
           data: {
@@ -173,6 +197,9 @@ export const membersRouter = router({
 
       const actor = await actorLabel(ctx.session.user.id);
       const { memberId, birthDate, deathDate, ...rest } = input;
+      if (rest.photoUrl && rest.photoUrl !== existing.photoUrl) {
+        rest.photoUrl = await optimiseMemberPhoto(existing.treeId, rest.photoUrl);
+      }
       const updated = await db.$transaction(async (tx) => {
         const member = await tx.member.update({
           where: { id: memberId },

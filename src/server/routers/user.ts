@@ -13,7 +13,7 @@ import {
   deleteTreePhotos,
 } from "@/lib/r2";
 import { broadcastTreeEvent } from "@/lib/realtime";
-import { optimiseAvatar } from "@/server/avatar";
+import { optimiseAvatar } from "@/server/photo-optimise";
 import { protectedProcedure, router } from "@/server/trpc";
 
 export const PASSWORD_MIN_LENGTH = 12;
