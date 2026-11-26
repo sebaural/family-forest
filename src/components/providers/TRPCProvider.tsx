@@ -35,6 +35,9 @@ export function TRPCProvider({ children }: { children: React.ReactNode }) {
         queryCache: new QueryCache({ onError: handleUnauthorized }),
         defaultOptions: {
           queries: {
+            // Server-rendered data (the tree page seeds the cache) isn't refetched
+            // as soon as it mounts. Focus refetches still happen once data is stale.
+            staleTime: 30_000,
             // Retrying can't fix UNAUTHORIZED; redirect on the first one.
             retry: (failureCount, error) => !isUnauthorized(error) && failureCount < 3,
           },

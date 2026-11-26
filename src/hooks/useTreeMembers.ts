@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo } from "react";
+import { MEMBERS_PAGE_SIZE } from "@/lib/tree-workspace";
 import { trpc } from "@/trpc/client";
 
 /**
@@ -9,7 +10,7 @@ import { trpc } from "@/trpc/client";
  */
 export function useTreeMembers(treeId: string) {
   const query = trpc.members.list.useInfiniteQuery(
-    { treeId, limit: 100 },
+    { treeId, limit: MEMBERS_PAGE_SIZE },
     { getNextPageParam: (lastPage) => lastPage.nextCursor },
   );
   const { data, hasNextPage, isFetchingNextPage, isError, fetchNextPage } = query;

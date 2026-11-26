@@ -1,6 +1,6 @@
 "use client";
 
-import { ReactFlowProvider } from "@xyflow/react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { ActivityPanel } from "@/components/activity/ActivityPanel";
@@ -9,7 +9,6 @@ import { MemberPanel, type MemberLink } from "@/components/members/MemberPanel";
 import { PlanLimitBanner } from "@/components/PlanLimitBanner";
 import { ShareDialog } from "@/components/share/ShareDialog";
 import { MemberList } from "@/components/tree/MemberList";
-import { TreeCanvas } from "@/components/tree-canvas/TreeCanvas";
 import { DeleteTreeDialog, RenameTreeDialog } from "@/components/trees/TreeDialogs";
 import { Dialog } from "@/components/ui/Dialog";
 import { KebabMenu } from "@/components/ui/KebabMenu";
@@ -18,36 +17,87 @@ import { useTreeEvents } from "@/hooks/useTreeEvents";
 import { useTreeMembers } from "@/hooks/useTreeMembers";
 import { memberFullName } from "@/lib/member-format";
 import type { RealtimeClientConfig } from "@/lib/tree-events";
+import { MEMBERS_PAGE_SIZE, viewCookieName, type WorkspaceView } from "@/lib/tree-workspace";
 import { getErrorMessage } from "@/lib/trpc-error";
 import { trpc } from "@/trpc/client";
-import type { Member } from "@/trpc/types";
+import type { Member, Relationship, RouterOutputs, TreeDetails } from "@/trpc/types";
 
-type WorkspaceView = "list" | "graph";
+// React Flow, dagre and the export code load only when the Graph view is shown.
+const TreeGraph = dynamic(() => import("@/components/tree-canvas/TreeCanvas"), {
+  ssr: false,
+  loading: () => (
+    <p className={`flex flex-1 items-center justify-center p-6 ${mutedText}`}>Loading tree…</p>
+  ),
+});
+
 const viewKey = (treeId: string) => `ff:view:${treeId}`;
 
-/** List | Graph, remembered per tree in localStorage. */
-function useWorkspaceView(treeId: string) {
-  const [view, setViewState] = useState<WorkspaceView>("list");
-  // Read after mount: the server render can't know the stored value.
+function persistView(treeId: string, view: WorkspaceView) {
+  // The cookie lets the server render the right view; localStorage is the older store.
+  document.cookie = `${viewCookieName(treeId)}=${view}; path=/; max-age=31536000; samesite=lax`;
+  try {
+    window.localStorage.setItem(viewKey(treeId), view);
+  } catch {
+    // Not persisted; the toggle still works for this visit.
+  }
+}
+
+/**
+ * List | Graph, remembered per tree. The server reads the cookie and passes
+ * `initialView`; without one (older visits) the localStorage value is used.
+ */
+function useWorkspaceView(treeId: string, initialView: WorkspaceView | null) {
+  const [view, setViewState] = useState<WorkspaceView>(initialView ?? "list");
   useEffect(() => {
+    if (initialView) return;
     try {
-      if (window.localStorage.getItem(viewKey(treeId)) === "graph") setViewState("graph");
+      if (window.localStorage.getItem(viewKey(treeId)) === "graph") {
+        setViewState("graph");
+        persistView(treeId, "graph");
+      }
     } catch {
       // Storage can be blocked (private mode); the list view is the fallback.
     }
-  }, [treeId]);
+  }, [treeId, initialView]);
   const setView = useCallback(
     (next: WorkspaceView) => {
       setViewState(next);
-      try {
-        window.localStorage.setItem(viewKey(treeId), next);
-      } catch {
-        // Not persisted; the toggle still works for this visit.
-      }
+      persistView(treeId, next);
     },
     [treeId],
   );
   return [view, setView] as const;
+}
+
+export interface TreeInitialData {
+  tree: TreeDetails;
+  membersPage: RouterOutputs["members"]["list"];
+  relationships: Relationship[];
+}
+
+/**
+ * Puts the server-fetched data in the query cache before the queries below
+ * mount, so the first render already has it (staleTime keeps it from being
+ * refetched straight away).
+ */
+function useSeedTreeCache(treeId: string, initialData: TreeInitialData | undefined) {
+  const utils = trpc.useUtils();
+  useState(() => {
+    if (!initialData) return;
+    // Only fill gaps: data already cached this visit is kept current by
+    // Realtime, and may be newer than a page payload from Next's router cache.
+    const membersInput = { treeId, limit: MEMBERS_PAGE_SIZE };
+    if (!utils.trees.get.getData({ treeId })) utils.trees.get.setData({ treeId }, initialData.tree);
+    if (!utils.members.list.getInfiniteData(membersInput)) {
+      utils.members.list.setInfiniteData(membersInput, {
+        pages: [initialData.membersPage],
+        pageParams: [null],
+      });
+    }
+    if (!utils.relationships.list.getData({ treeId })) {
+      utils.relationships.list.setData({ treeId }, initialData.relationships);
+    }
+  });
 }
 
 const segmentButton = (active: boolean) =>
@@ -60,10 +110,15 @@ const segmentButton = (active: boolean) =>
 export function TreeWorkspace({
   treeId,
   realtime,
+  initialData,
+  initialView = null,
 }: {
   treeId: string;
   realtime: RealtimeClientConfig | null;
+  initialData?: TreeInitialData;
+  initialView?: WorkspaceView | null;
 }) {
+  useSeedTreeCache(treeId, initialData);
   const router = useRouter();
   const tree = trpc.trees.get.useQuery({ treeId });
   const { members, isLoading, isLoadingMore, error, refetch } = useTreeMembers(treeId);
@@ -73,7 +128,7 @@ export function TreeWorkspace({
   const [addLink, setAddLink] = useState<MemberLink | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Member | null>(null);
   const [activityOpen, setActivityOpen] = useState(false);
-  const [view, setView] = useWorkspaceView(treeId);
+  const [view, setView] = useWorkspaceView(treeId, initialView);
   const [treeDialog, setTreeDialog] = useState<"rename" | "delete" | "share" | null>(null);
 
   useTreeEvents(treeId, realtime);
@@ -195,20 +250,18 @@ export function TreeWorkspace({
               <PlanLimitBanner current={memberCount} limit={memberLimit} resource="members" />
             </div>
           )}
-          <ReactFlowProvider>
-            <TreeCanvas
-              treeId={treeId}
-              canEdit={canEdit}
-              addMemberButton={addMemberButton}
-              onOpenMember={(member) => setSelectedId(member.id)}
-              onEdit={(member) => setSelectedId(member.id)}
-              onAddRelative={(member, as) => {
-                setAddLink({ member, as });
-                setAdding(true);
-              }}
-              onDelete={setDeleteTarget}
-            />
-          </ReactFlowProvider>
+          <TreeGraph
+            treeId={treeId}
+            canEdit={canEdit}
+            addMemberButton={addMemberButton}
+            onOpenMember={(member) => setSelectedId(member.id)}
+            onEdit={(member) => setSelectedId(member.id)}
+            onAddRelative={(member, as) => {
+              setAddLink({ member, as });
+              setAdding(true);
+            }}
+            onDelete={setDeleteTarget}
+          />
         </div>
       ) : (
         <div className="flex min-h-0 flex-1">

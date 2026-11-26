@@ -30,6 +30,8 @@ export function MemberAvatar({
       <img
         src={member.photoUrl}
         alt=""
+        // Not loading="lazy": graph exports need every node's photo loaded.
+        decoding="async"
         referrerPolicy="no-referrer"
         className={`${sizeClass} shrink-0 rounded-full object-cover`}
       />

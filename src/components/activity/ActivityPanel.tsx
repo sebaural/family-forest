@@ -19,6 +19,8 @@ function ActorAvatar({ name, image }: { name: string; image: string | null }) {
       <img
         src={image}
         alt=""
+        loading="lazy"
+        decoding="async"
         referrerPolicy="no-referrer"
         className="h-8 w-8 shrink-0 rounded-full object-cover"
       />

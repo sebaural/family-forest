@@ -8,6 +8,7 @@ import {
   MiniMap,
   Panel,
   ReactFlow,
+  ReactFlowProvider,
   useNodesState,
   useReactFlow,
   type EdgeTypes,
@@ -27,7 +28,7 @@ import type { Member } from "@/trpc/types";
 const nodeTypes: NodeTypes = { member: MemberNode };
 const edgeTypes: EdgeTypes = { relationship: RelationshipEdge };
 
-interface TreeCanvasProps extends NodeMenuActions {
+export interface TreeCanvasProps extends NodeMenuActions {
   treeId: string;
   canEdit: boolean;
   /** Opens the member detail drawer. */
@@ -202,3 +203,16 @@ export function TreeCanvas({
   );
 }
 
+
+/**
+ * TreeCanvas with its own ReactFlowProvider. The workspace loads this module
+ * with next/dynamic, so React Flow, dagre and the export code stay out of the
+ * List view's bundle.
+ */
+export default function TreeGraph(props: TreeCanvasProps) {
+  return (
+    <ReactFlowProvider>
+      <TreeCanvas {...props} />
+    </ReactFlowProvider>
+  );
+}

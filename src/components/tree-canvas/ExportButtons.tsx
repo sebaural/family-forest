@@ -1,7 +1,6 @@
 "use client";
 
 import { getNodesBounds, getViewportForBounds, useReactFlow } from "@xyflow/react";
-import { toJpeg, toSvg } from "html-to-image";
 import Link from "next/link";
 import { useState, type RefObject } from "react";
 import { Dialog } from "@/components/ui/Dialog";
@@ -63,6 +62,8 @@ export function ExportButtons({
           transform: `translate(${x}px, ${y}px) scale(${zoom})`,
         },
       };
+      // Loaded on first export, so it isn't part of the Graph view's bundle.
+      const { toJpeg, toSvg } = await import("html-to-image");
       const dataUrl =
         format === "svg"
           ? await toSvg(viewport, options)
