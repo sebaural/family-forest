@@ -63,6 +63,33 @@ export function Dialog({ open, onClose, title, variant = "modal", children }: Di
       }
     : {};
 
+  // A native modal <dialog> ignores backdrop clicks; close drawers on them.
+  // Both the press and the release must land outside the panel, so a text
+  // selection dragged out of it, or a click in a nested dialog, doesn't close it.
+  const isOutside = (event: React.MouseEvent<HTMLDialogElement>) => {
+    if (event.target !== event.currentTarget) return false;
+    const rect = event.currentTarget.getBoundingClientRect();
+    return (
+      event.clientX < rect.left ||
+      event.clientX > rect.right ||
+      event.clientY < rect.top ||
+      event.clientY > rect.bottom
+    );
+  };
+  const pressedOutside = useRef(false);
+  const backdropHandlers = isDrawer
+    ? {
+        onPointerDown: (event: React.PointerEvent<HTMLDialogElement>) => {
+          pressedOutside.current = isOutside(event);
+        },
+        onClick: (event: React.MouseEvent<HTMLDialogElement>) => {
+          const close = pressedOutside.current && isOutside(event);
+          pressedOutside.current = false;
+          if (close) onClose();
+        },
+      }
+    : {};
+
   return (
     <dialog
       ref={ref}
@@ -70,6 +97,7 @@ export function Dialog({ open, onClose, title, variant = "modal", children }: Di
       onClose={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
+      {...backdropHandlers}
       aria-labelledby={titleId}
       style={dragY > 0 ? { transform: `translateY(${dragY}px)` } : undefined}
       className={`bg-background text-foreground shadow-xl backdrop:bg-black/50 dark:border dark:border-gray-700 ${variants[variant]}`}
@@ -91,7 +119,7 @@ export function Dialog({ open, onClose, title, variant = "modal", children }: Di
                 type="button"
                 onClick={onClose}
                 aria-label="Close"
-                className="-mr-2 -mt-1 rounded p-2 text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800 sm:hidden"
+                className="-mr-2 -mt-1 rounded p-2 text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
               >
                 <svg aria-hidden viewBox="0 0 20 20" className="h-5 w-5" fill="currentColor">
                   <path d="M5.3 5.3a1 1 0 0 1 1.4 0L10 8.6l3.3-3.3a1 1 0 1 1 1.4 1.4L11.4 10l3.3 3.3a1 1 0 0 1-1.4 1.4L10 11.4l-3.3 3.3a1 1 0 0 1-1.4-1.4L8.6 10 5.3 6.7a1 1 0 0 1 0-1.4Z" />

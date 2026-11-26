@@ -146,6 +146,8 @@ interface MemberPanelProps {
   onAdded?: (memberId: string) => void;
   /** Only when adding: link the new member to this one. */
   link?: MemberLink;
+  /** Hide the member's name heading when the surrounding drawer already shows it. */
+  hideTitle?: boolean;
 }
 
 export function MemberPanel({
@@ -157,6 +159,7 @@ export function MemberPanel({
   onClose,
   onAdded,
   link,
+  hideTitle = false,
 }: MemberPanelProps) {
   const utils = trpc.useUtils();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -271,7 +274,7 @@ export function MemberPanel({
 
   return (
     <div className="mx-auto w-full max-w-2xl space-y-8">
-      {member && (
+      {member && !hideTitle && (
         <div className="flex items-center justify-between gap-3">
           <h2 className="min-w-0 truncate text-xl font-semibold">{memberFullName(member)}</h2>
           <button type="button" onClick={onClose} className={`${secondaryButton} md:hidden`}>

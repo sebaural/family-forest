@@ -281,6 +281,7 @@ export function TreeWorkspace({
               members={members}
               canEdit={canEdit}
               onClose={() => setSelectedId(null)}
+              hideTitle
             />
           )}
         </Dialog>
