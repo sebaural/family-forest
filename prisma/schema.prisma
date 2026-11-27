@@ -163,18 +163,21 @@ enum SubscriptionStatus {
 
 // ── Domain models ─────────────────────────────────────────────────────────
 model Member {
-  id         String    @id @default(cuid())
+  id         String     @id @default(cuid())
   treeId     String
   firstName  String
   lastName   String
   birthDate  DateTime?
   deathDate  DateTime?
   birthPlace String?
-  bio        String?   @db.Text
+  bio        String?    @db.Text
   photoUrl   String?
   userId     String?
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
+  // Set by the tree owner. For a member linked to a collaborator it mirrors that
+  // account's TreeCollaborator.role, which is what grants access.
+  role       CollabRole @default(VIEWER)
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
 
   tree     FamilyTree     @relation(fields: [treeId], references: [id], onDelete: Cascade)
   asParent Relationship[] @relation("fromMember")

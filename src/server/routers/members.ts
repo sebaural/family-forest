@@ -259,6 +259,38 @@ export const membersRouter = router({
       return updated;
     }),
 
+  /**
+   * Sets a member's role. Only the tree's owner may. For a member linked to a
+   * collaborator this changes that account's access too; otherwise it's stored on
+   * the member until they ever join.
+   */
+  setRole: protectedProcedure
+    .input(z.object({ memberId: z.cuid(), role: z.enum(["EDITOR", "VIEWER"]) }))
+    .mutation(async ({ ctx, input }) => {
+      const member = await db.member.findUnique({
+        where: { id: input.memberId },
+        select: { id: true, treeId: true, userId: true },
+      });
+      if (!member) throw new TRPCError({ code: "NOT_FOUND", message: "Member not found" });
+      const { ownerId } = await assertTreeAccess(member.treeId, ctx.session.user.id, "OWNER");
+      if (member.userId && member.userId === ownerId) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "The owner's role can't change" });
+      }
+
+      const accessChanged = await db.$transaction(async (tx) => {
+        await tx.member.update({ where: { id: member.id }, data: { role: input.role } });
+        if (!member.userId) return false;
+        const result = await tx.treeCollaborator.updateMany({
+          where: { treeId: member.treeId, userId: member.userId, approvedAt: { not: null } },
+          data: { role: input.role },
+        });
+        return result.count > 0;
+      });
+      await broadcastTreeEvent(member.treeId, "members_changed");
+      if (accessChanged) await broadcastTreeEvent(member.treeId, "access_changed");
+      return { ok: true as const };
+    }),
+
   /** Marks a member as the caller themselves ("This is me"), or undoes it. */
   linkSelf: protectedProcedure
     .input(z.object({ memberId: z.cuid(), linked: z.boolean() }))
@@ -269,7 +301,7 @@ export const membersRouter = router({
         select: { id: true, treeId: true, userId: true, firstName: true, lastName: true },
       });
       if (!member) throw new TRPCError({ code: "NOT_FOUND", message: "Member not found" });
-      await assertTreeAccess(member.treeId, userId, "EDITOR");
+      const { role: myRole } = await assertTreeAccess(member.treeId, userId, "EDITOR");
 
       if (input.linked && member.userId && member.userId !== userId) {
         throw new TRPCError({
@@ -293,7 +325,11 @@ export const membersRouter = router({
         }
         await tx.member.update({
           where: { id: member.id },
-          data: { userId: input.linked ? userId : null },
+          data: {
+            userId: input.linked ? userId : null,
+            // A collaborator's person shows their account role; the owner's keeps its own.
+            ...(input.linked && myRole !== "OWNER" ? { role: myRole } : {}),
+          },
         });
         await logActivity(tx, {
           treeId: member.treeId,

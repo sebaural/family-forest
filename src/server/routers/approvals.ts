@@ -79,6 +79,7 @@ export const approvalsRouter = router({
         where: { treeId_userId: { treeId, userId } },
         select: {
           approvedAt: true,
+          role: true,
           tree: { select: { name: true } },
           user: { select: { id: true, name: true, email: true } },
         },
@@ -102,7 +103,7 @@ export const approvalsRouter = router({
           where: { treeId_userId: { treeId, userId } },
           data: { approvedAt: new Date() },
         });
-        return ensureCollaboratorMember(tx, treeId, pending.user);
+        return ensureCollaboratorMember(tx, treeId, pending.user, pending.role);
       });
       await broadcastTreeEvent(treeId, "access_changed");
       if (memberAdded) await broadcastTreeEvent(treeId, "members_changed");

@@ -225,11 +225,12 @@ export const invitationsRouter = router({
         // waiting for approval gets one when the owner agrees.
         const memberAdded = pendingApproval
           ? false
-          : await ensureCollaboratorMember(tx, invitation.treeId, {
-              id: userId,
-              name: user.name,
-              email: user.email,
-            });
+          : await ensureCollaboratorMember(
+              tx,
+              invitation.treeId,
+              { id: userId, name: user.name, email: user.email },
+              existing?.role ?? invitation.role,
+            );
         return { joined: !existing, memberAdded, pendingApproval };
       });
 
@@ -323,15 +324,21 @@ export const invitationsRouter = router({
       const { treeId, userId, role } = input;
       await assertTreeAccess(treeId, ctx.session.user.id, "OWNER");
       // The owner is never a collaborator row, so their own role can't change here.
-      const updated = await db.treeCollaborator.updateMany({
-        where: { treeId, userId, approvedAt: { not: null } },
-        data: { role },
+      const updated = await db.$transaction(async (tx) => {
+        const result = await tx.treeCollaborator.updateMany({
+          where: { treeId, userId, approvedAt: { not: null } },
+          data: { role },
+        });
+        // Their person in the tree shows the same role.
+        if (result.count) await tx.member.updateMany({ where: { treeId, userId }, data: { role } });
+        return result;
       });
       if (updated.count === 0) {
         throw new TRPCError({ code: "NOT_FOUND", message: "This person doesn't have access to the tree" });
       }
       // Their open tree reloads its access, so editing controls appear or go at once.
       await broadcastTreeEvent(treeId, "access_changed");
+      await broadcastTreeEvent(treeId, "members_changed");
       return { ok: true as const };
     }),
 

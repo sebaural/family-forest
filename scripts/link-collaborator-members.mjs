@@ -23,11 +23,11 @@ const counts = { linked: 0, created: 0, skipped: 0 };
 
 try {
   const collaborators = await db.treeCollaborator.findMany({
-    select: { treeId: true, user: { select: { id: true, name: true, email: true } } },
+    select: { treeId: true, role: true, user: { select: { id: true, name: true, email: true } } },
   });
   console.log(`${collaborators.length} collaborators${dryRun ? " (dry run)" : ""}`);
 
-  for (const { treeId, user } of collaborators) {
+  for (const { treeId, role, user } of collaborators) {
     const existing = await db.member.findFirst({ where: { treeId, userId: user.id }, select: { id: true } });
     if (existing) {
       counts.skipped++;
@@ -48,7 +48,7 @@ try {
 
     if (sameName.length === 1) {
       console.log(`link   ${fullName} → member ${sameName[0].id} (tree ${treeId})`);
-      if (!dryRun) await db.member.update({ where: { id: sameName[0].id }, data: { userId: user.id } });
+      if (!dryRun) await db.member.update({ where: { id: sameName[0].id }, data: { userId: user.id, role } });
       counts.linked++;
       continue;
     }
@@ -56,7 +56,7 @@ try {
     console.log(`create ${fullName} (tree ${treeId})`);
     if (!dryRun) {
       await db.$transaction([
-        db.member.create({ data: { treeId, firstName, lastName, userId: user.id } }),
+        db.member.create({ data: { treeId, firstName, lastName, userId: user.id, role } }),
         db.activityLog.create({
           data: { treeId, actorId: user.id, action: "MEMBER_ADDED", description: `${fullName} joined the tree` },
         }),
