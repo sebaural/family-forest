@@ -20,15 +20,17 @@ export function MemberAvatar({
   member,
   size = "sm",
 }: {
-  member: Pick<Member, "firstName" | "lastName" | "photoUrl">;
+  member: Pick<Member, "firstName" | "lastName" | "photoUrl"> & { accountPhotoUrl?: string | null };
   size?: keyof typeof AVATAR_SIZES;
 }) {
   const sizeClass = AVATAR_SIZES[size];
-  if (member.photoUrl) {
+  // A member linked to an account shows that account's own picture, as the header does.
+  const src = member.accountPhotoUrl ?? member.photoUrl;
+  if (src) {
     return (
       // eslint-disable-next-line @next/next/no-img-element -- photo hosts aren't known up front
       <img
-        src={member.photoUrl}
+        src={src}
         alt=""
         // Not loading="lazy": graph exports need every node's photo loaded.
         decoding="async"

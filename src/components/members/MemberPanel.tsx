@@ -98,7 +98,7 @@ function MemberDetails({ member }: { member: Member }) {
   ] as const;
   return (
     <div className="space-y-4">
-      {member.photoUrl && <MemberAvatar member={member} size="lg" />}
+      {(member.accountPhotoUrl ?? member.photoUrl) && <MemberAvatar member={member} size="lg" />}
       <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-sm">
         {rows.map(([label, value]) =>
           value ? (
@@ -204,6 +204,14 @@ export function MemberPanel({
     },
   });
   const updateMember = trpc.members.update.useMutation({ onSuccess: invalidate });
+  // "This is me": links a member to the signed-in account, so it shows their picture.
+  const me = trpc.users.me.useQuery(undefined, { enabled: Boolean(member) && canEdit });
+  const linkSelf = trpc.members.linkSelf.useMutation({ onSuccess: invalidate });
+  const myId = me.data?.id;
+  const isMe = Boolean(member && myId && member.userId === myId);
+  const canClaim = Boolean(
+    member && myId && !member.userId && !members.some((other) => other.userId === myId),
+  );
   const removeMember = trpc.members.remove.useMutation({
     onSuccess: () => {
       invalidate();
@@ -345,6 +353,44 @@ export function MemberPanel({
             </div>
           )}
           <fieldset disabled={!canEdit} className="space-y-4">
+            {member && isMe && (
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className={mutedText}>This is you. Your profile picture is shown here.</p>
+                <button
+                  type="button"
+                  disabled={linkSelf.isPending}
+                  onClick={() => linkSelf.mutate({ memberId: member.id, linked: false })}
+                  className={secondaryButton}
+                >
+                  Unlink
+                </button>
+              </div>
+            )}
+            {member && canClaim && (
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className={mutedText}>Is this you? Link it to show your profile picture.</p>
+                <button
+                  type="button"
+                  disabled={linkSelf.isPending}
+                  onClick={() => linkSelf.mutate({ memberId: member.id, linked: true })}
+                  className={secondaryButton}
+                >
+                  {linkSelf.isPending && <Spinner />}
+                  This is me
+                </button>
+              </div>
+            )}
+            {member && !isMe && member.accountPhotoUrl && (
+              <p className={mutedText}>
+                Shown with {memberFullName(member)}&apos;s own profile picture. A picture added
+                here is used only if they remove theirs.
+              </p>
+            )}
+            {linkSelf.error && (
+              <p role="alert" className={errorText}>
+                {getErrorMessage(linkSelf.error)}
+              </p>
+            )}
             {(photoUploadsEnabled || photoUrl) && (
               <PhotoField
                 treeId={treeId}

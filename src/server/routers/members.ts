@@ -81,6 +81,27 @@ async function optimiseMemberPhoto(treeId: string, photoUrl: string): Promise<st
   return optimised;
 }
 
+/**
+ * Adds each member's account picture (when the member is linked to an account), so
+ * the tree shows the same picture as that person's header.
+ */
+async function withAccountPhotos<T extends { userId: string | null }>(
+  members: T[],
+): Promise<(T & { accountPhotoUrl: string | null })[]> {
+  const userIds = Array.from(new Set(members.flatMap((member) => (member.userId ? [member.userId] : []))));
+  const users = userIds.length
+    ? await db.user.findMany({
+        where: { id: { in: userIds } },
+        select: { id: true, avatarUrl: true, image: true },
+      })
+    : [];
+  const photoById = new Map(users.map((user) => [user.id, user.avatarUrl ?? user.image]));
+  return members.map((member) => ({
+    ...member,
+    accountPhotoUrl: (member.userId && photoById.get(member.userId)) || null,
+  }));
+}
+
 export const membersRouter = router({
   add: protectedProcedure
     .input(
@@ -97,6 +118,8 @@ export const membersRouter = router({
           )
           .max(MAX_LINKS)
           .optional(),
+        /** The caller is adding themselves: link the new member to their account. */
+        isSelf: z.boolean().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -155,10 +178,16 @@ export const membersRouter = router({
       const actor = await actorLabel(userId);
       const { treeId, firstName, lastName, birthPlace, bio, birthDate, deathDate } = input;
       const photoUrl = input.photoUrl && (await optimiseMemberPhoto(treeId, input.photoUrl));
+      // An account is at most one person per tree.
+      const selfUserId =
+        input.isSelf && !(await db.member.findFirst({ where: { treeId, userId }, select: { id: true } }))
+          ? userId
+          : null;
       const created = await db.$transaction(async (tx) => {
         const member = await tx.member.create({
           data: {
             treeId,
+            userId: selfUserId,
             firstName,
             lastName,
             birthPlace,
@@ -189,7 +218,8 @@ export const membersRouter = router({
     const member = await db.member.findUnique({ where: { id: input.memberId } });
     if (!member) throw new TRPCError({ code: "NOT_FOUND", message: "Member not found" });
     await assertTreeAccess(member.treeId, ctx.session.user.id);
-    return member;
+    const [withPhoto] = await withAccountPhotos([member]);
+    return withPhoto;
   }),
 
   update: protectedProcedure
@@ -226,6 +256,55 @@ export const membersRouter = router({
       }
       await broadcastTreeEvent(existing.treeId, "members_changed");
       return updated;
+    }),
+
+  /** Marks a member as the caller themselves ("This is me"), or undoes it. */
+  linkSelf: protectedProcedure
+    .input(z.object({ memberId: z.cuid(), linked: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      const userId = ctx.session.user.id;
+      const member = await db.member.findUnique({
+        where: { id: input.memberId },
+        select: { id: true, treeId: true, userId: true, firstName: true, lastName: true },
+      });
+      if (!member) throw new TRPCError({ code: "NOT_FOUND", message: "Member not found" });
+      await assertTreeAccess(member.treeId, userId, "EDITOR");
+
+      if (input.linked && member.userId && member.userId !== userId) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "This member is already linked to someone else's account",
+        });
+      }
+      if (!input.linked && member.userId !== userId) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "This member isn't linked to you" });
+      }
+      if (input.linked && member.userId === userId) return { ok: true as const };
+
+      const actor = await actorLabel(userId);
+      await db.$transaction(async (tx) => {
+        if (input.linked) {
+          // An account is at most one person per tree: move the link here.
+          await tx.member.updateMany({
+            where: { treeId: member.treeId, userId },
+            data: { userId: null },
+          });
+        }
+        await tx.member.update({
+          where: { id: member.id },
+          data: { userId: input.linked ? userId : null },
+        });
+        await logActivity(tx, {
+          treeId: member.treeId,
+          actorId: userId,
+          action: "MEMBER_UPDATED",
+          description: input.linked
+            ? `${actor} marked ${memberLabel(member)} as themselves`
+            : `${actor} unlinked themselves from ${memberLabel(member)}`,
+        });
+      });
+      await broadcastTreeEvent(member.treeId, "members_changed");
+      return { ok: true as const };
     }),
 
   remove: protectedProcedure
@@ -301,6 +380,9 @@ export const membersRouter = router({
       // The extra row only signals another page; the cursor is the last row returned.
       const hasMore = members.length > input.limit;
       if (hasMore) members.pop();
-      return { members, nextCursor: hasMore ? members.at(-1)?.id : undefined };
+      return {
+        members: await withAccountPhotos(members),
+        nextCursor: hasMore ? members.at(-1)?.id : undefined,
+      };
     }),
 });

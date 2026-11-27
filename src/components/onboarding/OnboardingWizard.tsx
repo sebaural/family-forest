@@ -128,6 +128,7 @@ export function OnboardingWizard({
                 firstName: member.firstName.trim(),
                 lastName: member.lastName.trim(),
                 birthDate: member.birthDate ? fromDateInputValue(member.birthDate) : undefined,
+                isSelf: true,
               })
               .catch(() => null);
             if (!added) return;

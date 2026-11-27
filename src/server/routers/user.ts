@@ -121,6 +121,15 @@ export const userRouter = router({
       if (avatarUrl !== undefined && current.avatarUrl && current.avatarUrl !== avatarUrl) {
         await deletePhotoByUrl(current.avatarUrl);
       }
+      if (avatarUrl !== undefined && avatarUrl !== current.avatarUrl) {
+        // Trees show this picture on the user's linked members: refresh any open ones.
+        const linked = await db.member.findMany({
+          where: { userId },
+          select: { treeId: true },
+          distinct: ["treeId"],
+        });
+        await Promise.all(linked.map(({ treeId }) => broadcastTreeEvent(treeId, "members_changed")));
+      }
       return { ok: true as const };
     }),
 
