@@ -1,7 +1,7 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useId, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { useForm, type FieldError } from "react-hook-form";
 import { z } from "zod";
 import { format } from "date-fns";
@@ -26,8 +26,16 @@ import {
 import {
   inverseKind,
   RELATIVE_LABEL,
+  relativeEdge,
   type RelativeKind,
 } from "@/lib/relationship-kind";
+import {
+  buildKinship,
+  linkOptions,
+  NEW_MEMBER_ID,
+  subjectView,
+  type Edge,
+} from "@/lib/relationship-rules";
 import { getErrorMessage } from "@/lib/trpc-error";
 import { trpc } from "@/trpc/client";
 import type { Member } from "@/trpc/types";
@@ -245,8 +253,35 @@ export function MemberPanel({
   const saveError = addMember.error ?? updateMember.error;
   const newName = memberFullName({ firstName, lastName }).trim() || "this member";
   // Each existing member can be linked once; the canvas link already uses one.
-  const linkedIds = new Set([link?.member.id, ...pending.map((entry) => entry.member.id)]);
-  const candidates = members.filter((other) => !linkedIds.has(other.id));
+  const candidates = useMemo(() => {
+    const linkedIds = new Set([link?.member.id, ...pending.map((entry) => entry.member.id)]);
+    return members.filter((other) => !linkedIds.has(other.id));
+  }, [members, link, pending]);
+  // The new member's queued links, as edges, so the dialog's rules account for them.
+  const relationships = trpc.relationships.list.useQuery({ treeId }, { enabled: !member });
+  const treeEdges = useMemo(() => relationships.data ?? [], [relationships.data]);
+  const pendingEdges = useMemo<Edge[]>(
+    () => [
+      // "The new member is link.member's linkAs".
+      ...(link && linkAs ? [relativeEdge(linkAs, link.member.id, NEW_MEMBER_ID)] : []),
+      // "entry.member is the new member's entry.kind".
+      ...pending.map((entry) => relativeEdge(entry.kind, NEW_MEMBER_ID, entry.member.id)),
+    ],
+    [link, linkAs, pending],
+  );
+  const newBirthDate = form.watch("birthDate");
+  const pendingBirthDate = newBirthDate ? fromDateInputValue(newBirthDate) : null;
+  const linkable = useMemo(
+    () =>
+      linkOptions(
+        subjectView(buildKinship([...treeEdges, ...pendingEdges]), {
+          id: NEW_MEMBER_ID,
+          birthDate: pendingBirthDate,
+        }),
+        candidates,
+      ).size > 0,
+    [treeEdges, pendingEdges, pendingBirthDate, candidates],
+  );
 
   const actions = canEdit && (
     <div className="flex flex-wrap items-center gap-2">
@@ -374,10 +409,10 @@ export function MemberPanel({
           <section className="space-y-3 border-t border-gray-200 pt-6 dark:border-gray-800">
             <div className="flex items-center justify-between gap-3">
               <h3 className="font-semibold">Relationships</h3>
-              <span title={candidates.length === 0 ? "No other members to link." : undefined}>
+              <span title={linkable ? undefined : "No other members can be linked."}>
                 <button
                   type="button"
-                  disabled={candidates.length === 0}
+                  disabled={!linkable || relationships.isPending}
                   onClick={() => setPickerOpen(true)}
                   className={secondaryButton}
                 >
@@ -414,8 +449,14 @@ export function MemberPanel({
             )}
             <RelationshipDialog
               treeId={treeId}
-              subject={{ kind: "pending", name: newName }}
+              subject={{
+                kind: "pending",
+                name: newName,
+                birthDate: pendingBirthDate,
+                links: pendingEdges,
+              }}
               candidates={candidates}
+              relationships={treeEdges}
               open={pickerOpen}
               onClose={() => setPickerOpen(false)}
               onPick={(kind, relative) =>

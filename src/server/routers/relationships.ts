@@ -2,6 +2,7 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { memberFullName } from "@/lib/member-format";
+import { buildKinship, edgeAsKind, kindError, subjectView } from "@/lib/relationship-rules";
 import { CYCLE_ERROR_MESSAGE } from "@/lib/trpc-error";
 import { broadcastTreeEvent } from "@/lib/realtime";
 import { actorLabel, logActivity, RELATIONSHIP_NOUN, relationshipPhrase } from "@/server/activity";
@@ -30,13 +31,22 @@ export const relationshipsRouter = router({
         });
       }
 
-      const people = await db.member.findMany({
-        where: { treeId, id: { in: [fromId, toId] } },
-        select: { id: true, firstName: true, lastName: true },
-      });
+      const [people, edges] = await Promise.all([
+        db.member.findMany({
+          where: { treeId, id: { in: [fromId, toId] } },
+          select: { id: true, firstName: true, lastName: true, birthDate: true },
+        }),
+        db.relationship.findMany({ where: { treeId }, select: { type: true, fromId: true, toId: true } }),
+      ]);
       const from = people.find((member) => member.id === fromId);
       const to = people.find((member) => member.id === toId);
       if (!from || !to) throw new TRPCError({ code: "NOT_FOUND", message: "Member not found" });
+
+      // The same rules the Add relationship dialog applies.
+      const { personId, kind } = edgeAsKind(input);
+      const [person, relative] = personId === from.id ? [from, to] : [to, from];
+      const ruleError = kindError(subjectView(buildKinship(edges), person), relative, kind);
+      if (ruleError) throw new TRPCError({ code: "BAD_REQUEST", message: ruleError });
 
       if (type === "PARENT_CHILD" && (await wouldCreateCycle(treeId, fromId, toId))) {
         throw new TRPCError({ code: "BAD_REQUEST", message: CYCLE_ERROR_MESSAGE });

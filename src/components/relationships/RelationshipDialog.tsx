@@ -18,23 +18,44 @@ import {
   relativeEdge,
   type RelativeKind,
 } from "@/lib/relationship-kind";
+import {
+  buildKinship,
+  linkOptions,
+  NEW_MEMBER_ID,
+  subjectView,
+  type Edge,
+} from "@/lib/relationship-rules";
 import { getErrorMessage } from "@/lib/trpc-error";
 import { trpc } from "@/trpc/client";
 import type { Member } from "@/trpc/types";
 
-/** The subject of the dialog: a saved member, or one still being added. */
-type Subject = { kind: "saved"; member: Member } | { kind: "pending"; name: string };
+/**
+ * The subject of the dialog: a saved member, or one still being added. A pending
+ * member's queued links are edges on NEW_MEMBER_ID, so the rules see them too.
+ */
+type Subject =
+  | { kind: "saved"; member: Member }
+  | { kind: "pending"; name: string; birthDate: string | null; links: Edge[] };
 
 interface RelationshipFormProps {
   treeId: string;
   subject: Subject;
   candidates: Member[];
+  /** The tree's relationships, which decide what each candidate may become. */
+  relationships: readonly Edge[];
   onClose: () => void;
   /** Pending mode: hand the choice back instead of saving it. */
   onPick?: (kind: RelativeKind, relative: Member) => void;
 }
 
-function RelationshipForm({ treeId, subject, candidates, onClose, onPick }: RelationshipFormProps) {
+function RelationshipForm({
+  treeId,
+  subject,
+  candidates,
+  relationships,
+  onClose,
+  onPick,
+}: RelationshipFormProps) {
   // No default: the user picks the role explicitly.
   const [kind, setKind] = useState<RelativeKind | "">("");
   const [targetId, setTargetId] = useState<string | null>(null);
@@ -49,18 +70,33 @@ function RelationshipForm({ treeId, subject, candidates, onClose, onPick }: Rela
     },
   });
 
+  const subjectMember = subject.kind === "saved" ? subject.member : null;
+  const pendingBirthDate = subject.kind === "pending" ? subject.birthDate : null;
+  const pendingLinks = subject.kind === "pending" ? subject.links : null;
+  // Which kinds each candidate may take; candidates with none aren't offered.
+  const options = useMemo(() => {
+    const kinship = buildKinship(pendingLinks ? [...relationships, ...pendingLinks] : relationships);
+    const person = subjectMember ?? { id: NEW_MEMBER_ID, birthDate: pendingBirthDate };
+    return linkOptions(subjectView(kinship, person), candidates);
+  }, [relationships, pendingLinks, subjectMember, pendingBirthDate, candidates]);
+  const allows = (memberId: string, value: RelativeKind) => options.get(memberId)?.has(value) ?? false;
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return candidates;
-    return candidates.filter((other) => memberFullName(other).toLowerCase().includes(q));
-  }, [candidates, search]);
+    return candidates.filter(
+      (other) =>
+        options.has(other.id) &&
+        (!kind || options.get(other.id)!.has(kind)) &&
+        (!q || memberFullName(other).toLowerCase().includes(q)),
+    );
+  }, [candidates, options, kind, search]);
 
   const name = subject.kind === "saved" ? memberFullName(subject.member) : subject.name;
   const target = candidates.find((other) => other.id === targetId) ?? null;
 
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
-    if (!kind || !target) return;
+    if (!kind || !target || !allows(target.id, kind)) return;
     if (subject.kind === "pending") {
       onPick?.(kind, target);
       onClose();
@@ -78,7 +114,9 @@ function RelationshipForm({ treeId, subject, candidates, onClose, onPick }: Rela
           required
           value={kind}
           onChange={(event) => {
-            setKind(event.target.value as RelativeKind);
+            const next = event.target.value as RelativeKind;
+            setKind(next);
+            if (targetId && !allows(targetId, next)) setTargetId(null);
             addRelationship.reset();
           }}
           className={inputClass}
@@ -87,7 +125,15 @@ function RelationshipForm({ treeId, subject, candidates, onClose, onPick }: Rela
             Choose a relationship…
           </option>
           {RELATIVE_KINDS.map((value) => (
-            <option key={value} value={value}>
+            <option
+              key={value}
+              value={value}
+              disabled={
+                target
+                  ? !allows(target.id, value)
+                  : !Array.from(options.values()).some((kinds) => kinds.has(value))
+              }
+            >
               {RELATIVE_LABEL[value]}
             </option>
           ))}
@@ -127,7 +173,13 @@ function RelationshipForm({ treeId, subject, candidates, onClose, onPick }: Rela
               </li>
             );
           })}
-          {filtered.length === 0 && <li className={`px-2 py-1 ${mutedText}`}>No members match</li>}
+          {filtered.length === 0 && (
+            <li className={`px-2 py-1 ${mutedText}`}>
+              {kind && !search.trim()
+                ? `No members can be added as ${name}'s ${RELATIVE_NOUN[kind]}`
+                : "No members match"}
+            </li>
+          )}
         </ul>
       </div>
 

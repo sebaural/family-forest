@@ -8,10 +8,9 @@ import { createPhotoUploadUrl, deletePhotoByUrl, treePhotoPrefix } from "@/lib/r
 import { actorLabel, logActivity, memberLabel } from "@/server/activity";
 import { assertTreeAccess } from "@/server/access";
 import { MEMBER_PHOTO_SIZE, optimisePhoto } from "@/server/photo-optimise";
-import { wouldCreateCycle } from "@/server/relationship-graph";
 import { protectedProcedure, router } from "@/server/trpc";
 import { RELATIVE_NOUN, relativeEdge } from "@/lib/relationship-kind";
-import { CYCLE_ERROR_MESSAGE } from "@/lib/trpc-error";
+import { addEdge, buildKinship, kindError, NEW_MEMBER_ID, subjectView } from "@/lib/relationship-rules";
 
 /** Most relationships a new member can be created with. */
 const MAX_LINKS = 20;
@@ -125,27 +124,32 @@ export const membersRouter = router({
           message: "Each family member can only be linked once",
         });
       }
-      const targets = links.length
-        ? await db.member.findMany({
-            where: { id: { in: links.map((link) => link.memberId) }, treeId: input.treeId },
-            select: { id: true, firstName: true, lastName: true },
-          })
-        : [];
+      const [targets, edges] = links.length
+        ? await Promise.all([
+            db.member.findMany({
+              where: { id: { in: links.map((link) => link.memberId) }, treeId: input.treeId },
+              select: { id: true, firstName: true, lastName: true, birthDate: true },
+            }),
+            db.relationship.findMany({
+              where: { treeId: input.treeId },
+              select: { type: true, fromId: true, toId: true },
+            }),
+          ])
+        : [[], []];
       if (targets.length !== links.length) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Member not found" });
       }
       const targetById = new Map(targets.map((target) => [target.id, target]));
 
-      // The new member sits between its parents and its children, so a child that is
-      // already an ancestor of one of its parents would close a loop.
-      const parentIds = links.filter((link) => link.as === "CHILD").map((link) => link.memberId);
-      const childIds = links.filter((link) => link.as === "PARENT").map((link) => link.memberId);
-      for (const parentId of parentIds) {
-        for (const childId of childIds) {
-          if (await wouldCreateCycle(input.treeId, parentId, childId)) {
-            throw new TRPCError({ code: "BAD_REQUEST", message: CYCLE_ERROR_MESSAGE });
-          }
-        }
+      // Check each link with the rules the Add relationship dialog applies, counting the
+      // links before it, so e.g. a child that is an ancestor of a parent (a loop) fails.
+      const kinship = buildKinship(edges);
+      const newMember = { id: NEW_MEMBER_ID, birthDate: input.birthDate ?? null };
+      for (const link of links) {
+        const target = targetById.get(link.memberId)!;
+        const ruleError = kindError(subjectView(kinship, target), newMember, link.as);
+        if (ruleError) throw new TRPCError({ code: "BAD_REQUEST", message: ruleError });
+        addEdge(kinship, relativeEdge(link.as, target.id, NEW_MEMBER_ID));
       }
 
       const actor = await actorLabel(userId);

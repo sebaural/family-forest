@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { RelationshipDialog } from "@/components/relationships/RelationshipDialog";
 import { errorText, mutedText, secondaryButton } from "@/components/ui/styles";
 import { memberFullName } from "@/lib/member-format";
+import { buildKinship, linkOptions, subjectView } from "@/lib/relationship-rules";
 import { getErrorMessage } from "@/lib/trpc-error";
 import { trpc } from "@/trpc/client";
 import type { Member, Relationship } from "@/trpc/types";
@@ -46,17 +47,31 @@ export function MemberRelationships({
     (relationship) => relationship.fromId === member.id || relationship.toId === member.id,
   );
   const memberById = new Map(members.map((other) => [other.id, other]));
-  const others = members.filter((other) => other.id !== member.id);
+  const others = useMemo(() => members.filter((other) => other.id !== member.id), [members, member.id]);
+  const allRelationships = useMemo(() => relationships.data ?? [], [relationships.data]);
+  // Only enable the button when at least one member can still be linked.
+  const linkable = useMemo(
+    () => linkOptions(subjectView(buildKinship(allRelationships), member), others).size > 0,
+    [allRelationships, member, others],
+  );
 
   return (
     <section className="space-y-3 border-t border-gray-200 pt-6 dark:border-gray-800">
       <div className="flex items-center justify-between gap-3">
         <h3 className="font-semibold">Relationships</h3>
         {canEdit && (
-          <span title={others.length === 0 ? "Add another member first." : undefined}>
+          <span
+            title={
+              others.length === 0
+                ? "Add another member first."
+                : !linkable
+                  ? "No one else can be linked to this member."
+                  : undefined
+            }
+          >
             <button
               type="button"
-              disabled={others.length === 0}
+              disabled={!linkable || relationships.isPending}
               onClick={() => setDialogOpen(true)}
               className={secondaryButton}
             >
@@ -115,6 +130,7 @@ export function MemberRelationships({
           treeId={treeId}
           subject={{ kind: "saved", member }}
           candidates={others}
+          relationships={allRelationships}
           open={dialogOpen}
           onClose={() => setDialogOpen(false)}
         />
