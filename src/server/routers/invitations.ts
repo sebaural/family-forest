@@ -316,6 +316,25 @@ export const invitationsRouter = router({
       return { ok: true as const };
     }),
 
+  /** Changes an approved collaborator's role. Only the tree's owner may. */
+  setRole: protectedProcedure
+    .input(z.object({ treeId: z.cuid(), userId: z.cuid(), role: z.enum(["EDITOR", "VIEWER"]) }))
+    .mutation(async ({ ctx, input }) => {
+      const { treeId, userId, role } = input;
+      await assertTreeAccess(treeId, ctx.session.user.id, "OWNER");
+      // The owner is never a collaborator row, so their own role can't change here.
+      const updated = await db.treeCollaborator.updateMany({
+        where: { treeId, userId, approvedAt: { not: null } },
+        data: { role },
+      });
+      if (updated.count === 0) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "This person doesn't have access to the tree" });
+      }
+      // Their open tree reloads its access, so editing controls appear or go at once.
+      await broadcastTreeEvent(treeId, "access_changed");
+      return { ok: true as const };
+    }),
+
   list: protectedProcedure
     .input(z.object({ treeId: z.cuid() }))
     .query(async ({ ctx, input }) => {

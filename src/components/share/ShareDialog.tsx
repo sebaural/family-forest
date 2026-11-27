@@ -43,6 +43,7 @@ function PersonRow({
   role,
   status,
   action,
+  roleControl,
 }: {
   name: string | null;
   email: string;
@@ -50,6 +51,8 @@ function PersonRow({
   role: keyof typeof roleLabel;
   status?: "pending" | "accepted" | "awaiting_approval";
   action?: React.ReactNode;
+  /** Replaces the role badge, e.g. the owner's role picker. */
+  roleControl?: React.ReactNode;
 }) {
   return (
     <li className="flex items-center gap-3 py-2">
@@ -58,7 +61,9 @@ function PersonRow({
         <p className="truncate text-sm font-medium">{name ?? email}</p>
         {name && <p className={`truncate text-xs ${mutedText}`}>{email}</p>}
       </div>
-      <span className="rounded bg-gray-100 px-2 py-0.5 text-xs dark:bg-gray-800">{roleLabel[role]}</span>
+      {roleControl ?? (
+        <span className="rounded bg-gray-100 px-2 py-0.5 text-xs dark:bg-gray-800">{roleLabel[role]}</span>
+      )}
       {status && (
         <span
           className={
@@ -124,7 +129,8 @@ function ShareView({ tree }: { tree: TreeDetails }) {
       void utils.approvals.count.invalidate();
     },
   });
-  const actionError = revoke.error ?? decide.error;
+  const changeRole = trpc.invitations.setRole.useMutation({ onSuccess: refresh });
+  const actionError = revoke.error ?? decide.error ?? changeRole.error;
 
   const collaboratorCount = tree.collaborators.length;
   const atCap = collaboratorCount >= tree.collaboratorLimit;
@@ -213,6 +219,27 @@ function ShareView({ tree }: { tree: TreeDetails }) {
               image={entry.image}
               role={entry.role}
               status={entry.status}
+              roleControl={
+                // Only the owner changes roles, and only of people who have joined.
+                isOwner && entry.kind === "collaborator" && entry.status === "accepted" ? (
+                  <select
+                    aria-label={`Role of ${entry.name ?? entry.email}`}
+                    value={entry.role}
+                    disabled={changeRole.isPending}
+                    onChange={(event) =>
+                      changeRole.mutate({
+                        treeId: tree.id,
+                        userId: entry.userId,
+                        role: event.target.value as Role,
+                      })
+                    }
+                    className="rounded border border-gray-300 bg-transparent px-1 py-0.5 text-xs dark:border-gray-700"
+                  >
+                    <option value="EDITOR">Editor</option>
+                    <option value="VIEWER">Viewer</option>
+                  </select>
+                ) : undefined
+              }
               action={
                 entry.status === "awaiting_approval" && entry.kind === "collaborator" ? (
                   <span className="flex gap-2">

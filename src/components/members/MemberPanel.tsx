@@ -5,6 +5,7 @@ import { useId, useMemo, useState } from "react";
 import { useForm, type FieldError } from "react-hook-form";
 import { z } from "zod";
 import { format } from "date-fns";
+import { MemberAccessRole } from "@/components/members/MemberAccessRole";
 import { PhotoField } from "@/components/members/PhotoField";
 import { MemberRelationships } from "@/components/relationships/MemberRelationships";
 import { RelationshipDialog } from "@/components/relationships/RelationshipDialog";
@@ -327,7 +328,10 @@ export function MemberPanel({
       )}
 
       {!canEdit && member ? (
-        <MemberDetails member={member} />
+        <div className="space-y-4">
+          <MemberAccessRole treeId={treeId} member={member} />
+          <MemberDetails member={member} />
+        </div>
       ) : (
         <form id={formId} onSubmit={form.handleSubmit(onSubmit)} className="space-y-4" noValidate>
           {!member && link && linkAs && (
@@ -353,6 +357,7 @@ export function MemberPanel({
             </div>
           )}
           <fieldset disabled={!canEdit} className="space-y-4">
+            {member && <MemberAccessRole treeId={treeId} member={member} />}
             {member && isMe && (
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className={mutedText}>This is you. Your profile picture is shown here.</p>
