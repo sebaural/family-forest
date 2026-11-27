@@ -1,7 +1,7 @@
-import { Prisma } from "@prisma/client";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
+import { PUBLIC_USER_SELECT, userPicture } from "@/lib/user-picture";
 import {
   isEmailConfigured,
   sendApprovalRequestEmail,
@@ -323,7 +323,6 @@ export const invitationsRouter = router({
       const { role } = await assertTreeAccess(input.treeId, me, "VIEWER");
       const isOwner = role === "OWNER";
 
-      const userSelect = { id: true, name: true, email: true, image: true } satisfies Prisma.UserSelect;
       const [invitations, collaborators] = await Promise.all([
         db.invitation.findMany({
           where: {
@@ -338,7 +337,7 @@ export const invitationsRouter = router({
         db.treeCollaborator.findMany({
           // Only the owner sees who is waiting for approval.
           where: { treeId: input.treeId, ...(isOwner ? {} : { approvedAt: { not: null } }) },
-          include: { user: { select: userSelect } },
+          include: { user: { select: PUBLIC_USER_SELECT } },
           orderBy: { createdAt: "asc" },
         }),
       ]);
@@ -354,7 +353,7 @@ export const invitationsRouter = router({
             invitationId: null,
             email: c.user.email,
             name: c.user.name,
-            image: c.user.image,
+            image: userPicture(c.user),
             role: c.role,
             canRevoke: isOwner,
             status: c.approvedAt ? ("accepted" as const) : ("awaiting_approval" as const),

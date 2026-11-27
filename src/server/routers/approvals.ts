@@ -1,6 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
+import { userPicture } from "@/lib/user-picture";
 import { sendAccessApprovedEmail } from "@/lib/email";
 import { broadcastTreeEvent } from "@/lib/realtime";
 import { assertTreeAccess } from "@/server/access";
@@ -54,7 +55,7 @@ export const approvalsRouter = router({
         id: entry.user.id,
         name: entry.user.name,
         email: entry.user.email,
-        image: entry.user.avatarUrl ?? entry.user.image,
+        image: userPicture(entry.user),
       },
       invitedBy: inviterOf.get(`${entry.treeId}:${entry.user.id}`) ?? null,
       requestedAt: entry.createdAt,

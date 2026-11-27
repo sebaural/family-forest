@@ -1,6 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
+import { PUBLIC_USER_SELECT, toPublicUser } from "@/lib/user-picture";
 import { getPlanLimits } from "@/lib/plan-limits";
 import { deleteTreePhotos, isR2Configured } from "@/lib/r2";
 import { broadcastTreeEvent } from "@/lib/realtime";
@@ -51,7 +52,7 @@ export const treesRouter = router({
       db.familyTree.findUniqueOrThrow({
         where: { id: input.treeId },
         include: {
-          owner: { select: { id: true, name: true, email: true, image: true } },
+          owner: { select: PUBLIC_USER_SELECT },
           members: {
             select: { id: true, firstName: true, lastName: true },
             orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
@@ -61,7 +62,7 @@ export const treesRouter = router({
             select: {
               role: true,
               createdAt: true,
-              user: { select: { id: true, name: true, email: true, image: true } },
+              user: { select: PUBLIC_USER_SELECT },
             },
           },
         },
@@ -70,6 +71,8 @@ export const treesRouter = router({
     ]);
     return {
       ...tree,
+      owner: toPublicUser(tree.owner),
+      collaborators: tree.collaborators.map((c) => ({ ...c, user: toPublicUser(c.user) })),
       role,
       memberLimit: limits.members,
       collaboratorLimit: limits.collaborators,

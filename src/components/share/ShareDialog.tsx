@@ -23,7 +23,7 @@ function Avatar({ name, email, image }: { name: string | null; email: string; im
   if (image) {
     return (
       // eslint-disable-next-line @next/next/no-img-element -- OAuth avatar hosts vary
-      <img src={image} alt="" referrerPolicy="no-referrer" className="h-8 w-8 shrink-0 rounded-full" />
+      <img src={image} alt="" referrerPolicy="no-referrer" className="h-8 w-8 shrink-0 rounded-full object-cover" />
     );
   }
   return (

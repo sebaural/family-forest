@@ -2,6 +2,7 @@ import { TRPCError } from "@trpc/server";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { db } from "@/lib/db";
+import { userPicture } from "@/lib/user-picture";
 import { ONBOARDING_COMPLETE } from "@/lib/onboarding";
 import { PHOTO_MAX_BYTES, PHOTO_TYPES, type PhotoContentType } from "@/lib/photo";
 import { getPlan, PLAN_LIMITS } from "@/lib/plan-limits";
@@ -48,7 +49,7 @@ export const userRouter = router({
     return {
       ...rest,
       /** What to show: the uploaded avatar, else the OAuth provider's picture. */
-      avatar: avatarUrl ?? image,
+      avatar: userPicture({ avatarUrl, image }),
       hasUploadedAvatar: avatarUrl !== null,
       hasPassword: password !== null,
       providers: Array.from(new Set(accounts.map((account) => account.provider))),
@@ -122,13 +123,19 @@ export const userRouter = router({
         await deletePhotoByUrl(current.avatarUrl);
       }
       if (avatarUrl !== undefined && avatarUrl !== current.avatarUrl) {
-        // Trees show this picture on the user's linked members: refresh any open ones.
-        const linked = await db.member.findMany({
-          where: { userId },
-          select: { treeId: true },
-          distinct: ["treeId"],
-        });
-        await Promise.all(linked.map(({ treeId }) => broadcastTreeEvent(treeId, "members_changed")));
+        // Trees show this picture on the user's linked members and in their people
+        // lists (Share): refresh any that are open.
+        const [linked, owned, shared] = await Promise.all([
+          db.member.findMany({ where: { userId }, select: { treeId: true }, distinct: ["treeId"] }),
+          db.familyTree.findMany({ where: { ownerId: userId }, select: { id: true } }),
+          db.treeCollaborator.findMany({ where: { userId }, select: { treeId: true } }),
+        ]);
+        await Promise.all([
+          ...linked.map(({ treeId }) => broadcastTreeEvent(treeId, "members_changed")),
+          ...[...owned.map((tree) => tree.id), ...shared.map((row) => row.treeId)].map((treeId) =>
+            broadcastTreeEvent(treeId, "access_changed"),
+          ),
+        ]);
       }
       return { ok: true as const };
     }),

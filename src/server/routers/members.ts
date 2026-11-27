@@ -1,6 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
+import { userPicture } from "@/lib/user-picture";
 import { PHOTO_MAX_BYTES, PHOTO_TYPES, type PhotoContentType } from "@/lib/photo";
 import { getPlanLimits } from "@/lib/plan-limits";
 import { broadcastTreeEvent } from "@/lib/realtime";
@@ -95,7 +96,7 @@ async function withAccountPhotos<T extends { userId: string | null }>(
         select: { id: true, avatarUrl: true, image: true },
       })
     : [];
-  const photoById = new Map(users.map((user) => [user.id, user.avatarUrl ?? user.image]));
+  const photoById = new Map(users.map((user) => [user.id, userPicture(user)]));
   return members.map((member) => ({
     ...member,
     accountPhotoUrl: (member.userId && photoById.get(member.userId)) || null,

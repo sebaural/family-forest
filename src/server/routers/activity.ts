@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { db } from "@/lib/db";
+import { userPicture } from "@/lib/user-picture";
 import { assertTreeAccess } from "@/server/access";
 import { protectedProcedure, router } from "@/server/trpc";
 
@@ -24,7 +25,7 @@ export const activityRouter = router({
     return entries.map(({ actor, ...entry }) => ({
       ...entry,
       actorName: actor ? actor.name?.trim() || actor.email : "Deleted user",
-      actorImage: actor?.avatarUrl ?? actor?.image ?? null,
+      actorImage: actor ? userPicture(actor) : null,
     }));
   }),
 });
