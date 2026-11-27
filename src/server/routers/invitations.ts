@@ -13,6 +13,7 @@ import {
 import { getPlanLimits } from "@/lib/plan-limits";
 import { broadcastTreeEvent } from "@/lib/realtime";
 import { assertTreeAccess } from "@/server/access";
+import { ensureCollaboratorMember } from "@/server/collaborator-member";
 import { protectedProcedure, router } from "@/server/trpc";
 
 /** Error message the client matches to show the collaborator-cap state. */
@@ -148,7 +149,7 @@ export const invitationsRouter = router({
       }
 
       const limits = await getPlanLimits(invitation.tree.ownerId);
-      const joined = await db.$transaction(async (tx) => {
+      const { joined, memberAdded } = await db.$transaction(async (tx) => {
         // Lock the tree row so concurrent accepts can't both slip under the cap.
         await tx.$queryRaw`SELECT id FROM "FamilyTree" WHERE id = ${invitation.treeId} FOR UPDATE`;
 
@@ -175,10 +176,17 @@ export const invitationsRouter = router({
           where: { id: invitation.id },
           data: { acceptedAt: new Date(), acceptedById: userId },
         });
-        return !existing;
+        // Give the collaborator a person node so they appear in the tree.
+        const memberAdded = await ensureCollaboratorMember(tx, invitation.treeId, {
+          id: userId,
+          name: user.name,
+          email: user.email,
+        });
+        return { joined: !existing, memberAdded };
       });
 
       await broadcastTreeEvent(invitation.treeId, "access_changed");
+      if (memberAdded) await broadcastTreeEvent(invitation.treeId, "members_changed");
       // Only the owner sends invitations, so only the owner hears about accepts.
       if (joined && invitation.tree.owner.inviteAcceptedNotify) {
         await sendInviteAcceptedEmail({
@@ -224,6 +232,11 @@ export const invitationsRouter = router({
         ...(removeUserId
           ? [
               db.treeCollaborator.deleteMany({ where: { treeId, userId: removeUserId } }),
+              // Their person node stays in the family tree; only the account link goes.
+              db.member.updateMany({
+                where: { treeId, userId: removeUserId },
+                data: { userId: null },
+              }),
               // Accepted invites for that person go too, so the list stays consistent.
               db.invitation.deleteMany({ where: { treeId, acceptedById: removeUserId } }),
             ]
