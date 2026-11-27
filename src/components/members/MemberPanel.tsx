@@ -515,7 +515,13 @@ export function MemberPanel({
       )}
 
       {member && (
-        <MemberRelationships treeId={treeId} member={member} members={members} canEdit={canEdit} />
+        <MemberRelationships
+          treeId={treeId}
+          member={member}
+          members={members}
+          canAdd
+          canRemove={canEdit}
+        />
       )}
 
       {member && canEdit && (

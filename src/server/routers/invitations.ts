@@ -2,7 +2,12 @@ import { Prisma } from "@prisma/client";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { isEmailConfigured, sendInviteAcceptedEmail, sendInviteEmail } from "@/lib/email";
+import {
+  isEmailConfigured,
+  sendApprovalRequestEmail,
+  sendInviteAcceptedEmail,
+  sendInviteEmail,
+} from "@/lib/email";
 import {
   hashToken,
   INVITE_TTL_DAYS,
@@ -24,6 +29,9 @@ const collaboratorLimitError = () =>
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+/** How many unanswered invites a non-owner may have out on one tree. */
+const MAX_PENDING_PER_INVITER = 10;
+
 export const invitationsRouter = router({
   send: protectedProcedure
     .input(
@@ -35,23 +43,50 @@ export const invitationsRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const userId = ctx.session.user.id;
-      const { ownerId } = await assertTreeAccess(input.treeId, userId, "OWNER");
+      // Anyone with access may invite. Invites from non-owners only grant viewer
+      // access, and only once the owner approves the person (see approvals router).
+      const { ownerId, role: myRole } = await assertTreeAccess(input.treeId, userId, "VIEWER");
+      const isOwner = myRole === "OWNER";
+      const role = isOwner ? input.role : "VIEWER";
 
-      const [tree, owner, existingUser] = await Promise.all([
+      const [tree, owner, inviter, existingUser] = await Promise.all([
         db.familyTree.findUniqueOrThrow({ where: { id: input.treeId }, select: { name: true } }),
         db.user.findUniqueOrThrow({ where: { id: ownerId }, select: { name: true, email: true } }),
+        db.user.findUniqueOrThrow({ where: { id: userId }, select: { name: true, email: true } }),
         db.user.findUnique({ where: { email: input.email }, select: { id: true } }),
       ]);
 
       if (owner.email.toLowerCase() === input.email) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "You already own this tree" });
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: isOwner ? "You already own this tree" : "That's the tree's owner",
+        });
+      }
+      if (!isOwner) {
+        const mine = await db.invitation.count({
+          where: {
+            treeId: input.treeId,
+            invitedById: userId,
+            acceptedAt: null,
+            expiresAt: { gt: new Date() },
+            NOT: { email: input.email },
+          },
+        });
+        if (mine >= MAX_PENDING_PER_INVITER) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "You have too many pending invitations" });
+        }
       }
       if (existingUser) {
         const already = await db.treeCollaborator.findUnique({
           where: { treeId_userId: { treeId: input.treeId, userId: existingUser.id } },
         });
         if (already) {
-          throw new TRPCError({ code: "CONFLICT", message: "That person already has access" });
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: already.approvedAt
+              ? "That person already has access"
+              : "That person is already waiting for the owner's approval",
+          });
         }
       }
 
@@ -71,7 +106,7 @@ export const invitationsRouter = router({
           data: {
             treeId: input.treeId,
             email: input.email,
-            role: input.role,
+            role,
             // Replaced with the real hash once the token (which embeds the id) is signed.
             tokenHash: `pending:${crypto.randomUUID()}`,
             expiresAt: new Date(Date.now() + INVITE_TTL_DAYS * DAY_MS),
@@ -83,7 +118,7 @@ export const invitationsRouter = router({
       const token = await signInviteToken({
         invitationId: invitation.id,
         treeId: input.treeId,
-        role: input.role,
+        role,
       });
       await db.invitation.update({
         where: { id: invitation.id },
@@ -94,7 +129,7 @@ export const invitationsRouter = router({
       const emailSent = await sendInviteEmail({
         to: input.email,
         treeName: tree.name,
-        inviterName: owner.name ?? owner.email,
+        inviterName: inviter.name ?? inviter.email,
         url,
       });
 
@@ -125,6 +160,7 @@ export const invitationsRouter = router({
                 owner: { select: { email: true, inviteAcceptedNotify: true } },
               },
             },
+            invitedBy: { select: { name: true, email: true } },
           },
         }),
         db.user.findUniqueOrThrow({ where: { id: userId }, select: { email: true, name: true } }),
@@ -148,8 +184,10 @@ export const invitationsRouter = router({
         throw new TRPCError({ code: "BAD_REQUEST", message: "You already own this tree" });
       }
 
+      // Invites sent by anyone but the owner wait for the owner's approval.
+      const needsApproval = invitation.invitedById !== invitation.tree.ownerId;
       const limits = await getPlanLimits(invitation.tree.ownerId);
-      const { joined, memberAdded } = await db.$transaction(async (tx) => {
+      const { joined, memberAdded, pendingApproval } = await db.$transaction(async (tx) => {
         // Lock the tree row so concurrent accepts can't both slip under the cap.
         await tx.$queryRaw`SELECT id FROM "FamilyTree" WHERE id = ${invitation.treeId} FOR UPDATE`;
 
@@ -169,24 +207,47 @@ export const invitationsRouter = router({
           const count = await tx.treeCollaborator.count({ where: { treeId: invitation.treeId } });
           if (count >= limits.collaborators) throw collaboratorLimitError();
           await tx.treeCollaborator.create({
-            data: { treeId: invitation.treeId, userId, role: invitation.role },
+            data: {
+              treeId: invitation.treeId,
+              userId,
+              role: invitation.role,
+              approvedAt: needsApproval ? null : new Date(),
+            },
           });
         }
         await tx.invitation.update({
           where: { id: invitation.id },
           data: { acceptedAt: new Date(), acceptedById: userId },
         });
-        // Give the collaborator a person node so they appear in the tree.
-        const memberAdded = await ensureCollaboratorMember(tx, invitation.treeId, {
-          id: userId,
-          name: user.name,
-          email: user.email,
-        });
-        return { joined: !existing, memberAdded };
+        // Already-approved access (e.g. a second invite) stays approved.
+        const pendingApproval = existing ? !existing.approvedAt : needsApproval;
+        // Give the collaborator a person node so they appear in the tree; a person
+        // waiting for approval gets one when the owner agrees.
+        const memberAdded = pendingApproval
+          ? false
+          : await ensureCollaboratorMember(tx, invitation.treeId, {
+              id: userId,
+              name: user.name,
+              email: user.email,
+            });
+        return { joined: !existing, memberAdded, pendingApproval };
       });
 
       await broadcastTreeEvent(invitation.treeId, "access_changed");
       if (memberAdded) await broadcastTreeEvent(invitation.treeId, "members_changed");
+      if (pendingApproval) {
+        // An action for the owner, so it's sent whatever their notification settings.
+        if (joined) {
+          await sendApprovalRequestEmail({
+            to: invitation.tree.owner.email,
+            personName: user.name ?? user.email,
+            personEmail: user.email,
+            inviterName: invitation.invitedBy?.name ?? invitation.invitedBy?.email ?? "Someone",
+            treeName: invitation.tree.name,
+          });
+        }
+        return { treeId: invitation.treeId, pendingApproval: true as const };
+      }
       // Only the owner sends invitations, so only the owner hears about accepts.
       if (joined && invitation.tree.owner.inviteAcceptedNotify) {
         await sendInviteAcceptedEmail({
@@ -197,7 +258,7 @@ export const invitationsRouter = router({
           role: invitation.role,
         });
       }
-      return { treeId: invitation.treeId };
+      return { treeId: invitation.treeId, pendingApproval: false as const };
     }),
 
   revoke: protectedProcedure
@@ -214,16 +275,24 @@ export const invitationsRouter = router({
       if (input.kind === "invitation") {
         const invitation = await db.invitation.findUnique({
           where: { id: input.invitationId },
-          select: { treeId: true, acceptedById: true },
+          select: { treeId: true, acceptedById: true, acceptedAt: true, invitedById: true },
         });
         if (!invitation) throw new TRPCError({ code: "NOT_FOUND", message: "Invitation not found" });
         treeId = invitation.treeId;
         removeUserId = invitation.acceptedById;
+        const { role } = await assertTreeAccess(treeId, ctx.session.user.id, "VIEWER");
+        // Others may withdraw only their own invites that nobody has used yet.
+        if (
+          role !== "OWNER" &&
+          (invitation.invitedById !== ctx.session.user.id || invitation.acceptedAt)
+        ) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "You don't have permission to do that" });
+        }
       } else {
         treeId = input.treeId;
         removeUserId = input.userId;
+        await assertTreeAccess(treeId, ctx.session.user.id, "OWNER");
       }
-      await assertTreeAccess(treeId, ctx.session.user.id, "OWNER");
 
       await db.$transaction([
         ...(input.kind === "invitation"
@@ -250,22 +319,32 @@ export const invitationsRouter = router({
   list: protectedProcedure
     .input(z.object({ treeId: z.cuid() }))
     .query(async ({ ctx, input }) => {
-      await assertTreeAccess(input.treeId, ctx.session.user.id, "OWNER");
+      const me = ctx.session.user.id;
+      const { role } = await assertTreeAccess(input.treeId, me, "VIEWER");
+      const isOwner = role === "OWNER";
 
       const userSelect = { id: true, name: true, email: true, image: true } satisfies Prisma.UserSelect;
       const [invitations, collaborators] = await Promise.all([
         db.invitation.findMany({
-          where: { treeId: input.treeId, acceptedAt: null, expiresAt: { gt: new Date() } },
+          where: {
+            treeId: input.treeId,
+            acceptedAt: null,
+            expiresAt: { gt: new Date() },
+            // Others see only the invites they sent.
+            ...(isOwner ? {} : { invitedById: me }),
+          },
           orderBy: { createdAt: "desc" },
         }),
         db.treeCollaborator.findMany({
-          where: { treeId: input.treeId },
+          // Only the owner sees who is waiting for approval.
+          where: { treeId: input.treeId, ...(isOwner ? {} : { approvedAt: { not: null } }) },
           include: { user: { select: userSelect } },
           orderBy: { createdAt: "asc" },
         }),
       ]);
 
       return {
+        isOwner,
         emailEnabled: isEmailConfigured(),
         entries: [
           ...collaborators.map((c) => ({
@@ -277,7 +356,8 @@ export const invitationsRouter = router({
             name: c.user.name,
             image: c.user.image,
             role: c.role,
-            status: "accepted" as const,
+            canRevoke: isOwner,
+            status: c.approvedAt ? ("accepted" as const) : ("awaiting_approval" as const),
             invitedAt: null,
             acceptedAt: c.createdAt,
           })),
@@ -291,6 +371,8 @@ export const invitationsRouter = router({
             image: null,
             role: i.role,
             status: "pending" as const,
+            /** Whether the caller may withdraw it: the owner, or whoever sent it. */
+            canRevoke: isOwner || i.invitedById === me,
             invitedAt: i.createdAt,
             acceptedAt: null,
           })),

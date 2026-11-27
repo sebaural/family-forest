@@ -2,7 +2,9 @@ import { TRPCError } from "@trpc/server";
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { auth } from "@/lib/auth";
 import { TreeWorkspace } from "@/components/tree/TreeWorkspace";
+import { db } from "@/lib/db";
 import { getRealtimeClientConfig } from "@/lib/realtime";
 import { MEMBERS_PAGE_SIZE, viewCookieName } from "@/lib/tree-workspace";
 import { sessionExpiredPath } from "@/server/session";
@@ -32,7 +34,16 @@ export default async function TreePage({ params }: { params: { treeId: string } 
     }
     // NOT_FOUND covers trees the caller can't access; BAD_REQUEST a malformed id.
     if (error instanceof TRPCError && (error.code === "NOT_FOUND" || error.code === "BAD_REQUEST")) {
-      redirect("/dashboard?error=tree-not-found");
+      // Waiting for the owner's approval: the dashboard says so.
+      const session = await auth();
+      const awaiting =
+        error.code === "NOT_FOUND" &&
+        session?.user &&
+        (await db.treeCollaborator.findFirst({
+          where: { treeId, userId: session.user.id, approvedAt: null },
+          select: { treeId: true },
+        }));
+      redirect(awaiting ? "/dashboard" : "/dashboard?error=tree-not-found");
     }
     throw error;
   }

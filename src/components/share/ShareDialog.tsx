@@ -48,7 +48,7 @@ function PersonRow({
   email: string;
   image: string | null;
   role: keyof typeof roleLabel;
-  status?: "pending" | "accepted";
+  status?: "pending" | "accepted" | "awaiting_approval";
   action?: React.ReactNode;
 }) {
   return (
@@ -62,12 +62,12 @@ function PersonRow({
       {status && (
         <span
           className={
-            status === "pending"
+            status !== "accepted"
               ? "rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-900 dark:bg-amber-950 dark:text-amber-200"
               : "rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200"
           }
         >
-          {status === "pending" ? "Pending" : "Accepted"}
+          {status === "pending" ? "Pending" : status === "accepted" ? "Accepted" : "Awaiting approval"}
         </span>
       )}
       {action}
@@ -93,7 +93,12 @@ function CopyLink({ url }: { url: string }) {
   );
 }
 
-function OwnerView({ tree }: { tree: TreeDetails }) {
+/**
+ * Everyone can invite. The owner picks the role and manages everyone; others invite
+ * viewers, who join once the owner approves, and can withdraw their own invites.
+ */
+function ShareView({ tree }: { tree: TreeDetails }) {
+  const isOwner = tree.role === "OWNER";
   const utils = trpc.useUtils();
   const access = trpc.invitations.list.useQuery({ treeId: tree.id });
   const [email, setEmail] = useState("");
@@ -112,6 +117,14 @@ function OwnerView({ tree }: { tree: TreeDetails }) {
     },
   });
   const revoke = trpc.invitations.revoke.useMutation({ onSuccess: refresh });
+  const decide = trpc.approvals.decide.useMutation({
+    onSuccess: () => {
+      refresh();
+      void utils.approvals.list.invalidate();
+      void utils.approvals.count.invalidate();
+    },
+  });
+  const actionError = revoke.error ?? decide.error;
 
   const collaboratorCount = tree.collaborators.length;
   const atCap = collaboratorCount >= tree.collaboratorLimit;
@@ -127,7 +140,7 @@ function OwnerView({ tree }: { tree: TreeDetails }) {
         onSubmit={(event) => {
           event.preventDefault();
           setSent(null);
-          send.mutate({ treeId: tree.id, email, role });
+          send.mutate({ treeId: tree.id, email, role: isOwner ? role : "VIEWER" });
         }}
       >
         <label className="block space-y-1">
@@ -141,16 +154,23 @@ function OwnerView({ tree }: { tree: TreeDetails }) {
             className={inputClass}
           />
         </label>
+        {!isOwner && (
+          <p className={`text-xs ${mutedText}`}>
+            People you invite join as viewers once the owner approves.
+          </p>
+        )}
         <div className="flex gap-2">
-          <select
-            aria-label="Role"
-            value={role}
-            onChange={(e) => setRole(e.target.value as Role)}
-            className={`${inputClass} w-auto`}
-          >
-            <option value="EDITOR">Editor</option>
-            <option value="VIEWER">Viewer</option>
-          </select>
+          {isOwner && (
+            <select
+              aria-label="Role"
+              value={role}
+              onChange={(e) => setRole(e.target.value as Role)}
+              className={`${inputClass} w-auto`}
+            >
+              <option value="EDITOR">Editor</option>
+              <option value="VIEWER">Viewer</option>
+            </select>
+          )}
           <button type="submit" disabled={atCap || send.isPending} className={primaryButton}>
             {send.isPending && <Spinner />}
             Send invite
@@ -194,21 +214,42 @@ function OwnerView({ tree }: { tree: TreeDetails }) {
               role={entry.role}
               status={entry.status}
               action={
-                <button
-                  type="button"
-                  disabled={revoke.isPending}
-                  aria-label={`Remove ${entry.name ?? entry.email}`}
-                  onClick={() =>
-                    revoke.mutate(
-                      entry.kind === "invitation"
-                        ? { kind: "invitation", invitationId: entry.invitationId }
-                        : { kind: "collaborator", treeId: tree.id, userId: entry.userId },
-                    )
-                  }
-                  className="text-sm text-red-600 hover:underline dark:text-red-400"
-                >
-                  Remove
-                </button>
+                entry.status === "awaiting_approval" && entry.kind === "collaborator" ? (
+                  <span className="flex gap-2">
+                    <button
+                      type="button"
+                      disabled={decide.isPending}
+                      onClick={() => decide.mutate({ treeId: tree.id, userId: entry.userId, approve: true })}
+                      className="text-sm text-emerald-700 hover:underline dark:text-emerald-400"
+                    >
+                      Agree
+                    </button>
+                    <button
+                      type="button"
+                      disabled={decide.isPending}
+                      onClick={() => decide.mutate({ treeId: tree.id, userId: entry.userId, approve: false })}
+                      className="text-sm text-red-600 hover:underline dark:text-red-400"
+                    >
+                      Decline
+                    </button>
+                  </span>
+                ) : entry.canRevoke ? (
+                  <button
+                    type="button"
+                    disabled={revoke.isPending}
+                    aria-label={`Remove ${entry.name ?? entry.email}`}
+                    onClick={() =>
+                      revoke.mutate(
+                        entry.kind === "invitation"
+                          ? { kind: "invitation", invitationId: entry.invitationId }
+                          : { kind: "collaborator", treeId: tree.id, userId: entry.userId },
+                      )
+                    }
+                    className="text-sm text-red-600 hover:underline dark:text-red-400"
+                  >
+                    Remove
+                  </button>
+                ) : null
               }
             />
           ))}
@@ -219,28 +260,13 @@ function OwnerView({ tree }: { tree: TreeDetails }) {
             {getErrorMessage(access.error)}
           </p>
         )}
-        {revoke.error && (
+        {actionError && (
           <p role="alert" className={errorText}>
-            {getErrorMessage(revoke.error)}
+            {getErrorMessage(actionError)}
           </p>
         )}
       </section>
     </div>
-  );
-}
-
-function ReadOnlyView({ tree }: { tree: TreeDetails }) {
-  return (
-    <section className="space-y-1">
-      <h3 className="text-sm font-semibold">People with access</h3>
-      <ul className="divide-y divide-gray-200 dark:divide-gray-800">
-        <PersonRow name={tree.owner.name} email={tree.owner.email} image={tree.owner.image} role="OWNER" />
-        {tree.collaborators.map((c) => (
-          <PersonRow key={c.user.id} name={c.user.name} email={c.user.email} image={c.user.image} role={c.role} />
-        ))}
-      </ul>
-      <p className={`pt-2 text-xs ${mutedText}`}>Only the owner can invite or remove people.</p>
-    </section>
   );
 }
 
@@ -255,7 +281,7 @@ export function ShareDialog({
 }) {
   return (
     <Dialog open={open} onClose={onClose} title={`Share “${tree.name}”`}>
-      {tree.role === "OWNER" ? <OwnerView tree={tree} /> : <ReadOnlyView tree={tree} />}
+      <ShareView tree={tree} />
       <div className="mt-6 flex justify-end">
         <button type="button" onClick={onClose} className={secondaryButton}>
           Done

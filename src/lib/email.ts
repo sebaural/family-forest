@@ -2,6 +2,8 @@ import "server-only";
 import { render } from "@react-email/render";
 import { createElement } from "react";
 import { Resend } from "resend";
+import AccessApprovedEmail from "@/emails/AccessApprovedEmail";
+import ApprovalRequestEmail from "@/emails/ApprovalRequestEmail";
 import DigestEmail, { type DigestTree } from "@/emails/DigestEmail";
 import InviteAcceptedEmail from "@/emails/InviteAcceptedEmail";
 import WelcomeEmail from "@/emails/WelcomeEmail";
@@ -112,6 +114,45 @@ export function sendInviteAcceptedEmail(input: {
       role: input.role,
       treeUrl: appUrl(`/tree/${input.treeId}`),
       settingsUrl: appUrl("/settings/notifications"),
+    }),
+  });
+}
+
+/** To the owner: someone invited by a collaborator is waiting for approval. */
+export function sendApprovalRequestEmail(input: {
+  to: string;
+  personName: string;
+  personEmail: string;
+  inviterName: string;
+  treeName: string;
+}): Promise<boolean> {
+  return sendTemplate({
+    to: input.to,
+    subject: `${input.personName} is waiting for your approval to join ${input.treeName}`,
+    label: "approval-request",
+    element: createElement(ApprovalRequestEmail, {
+      personName: input.personName,
+      personEmail: input.personEmail,
+      inviterName: input.inviterName,
+      treeName: input.treeName,
+      approvalsUrl: appUrl("/settings/approvals"),
+    }),
+  });
+}
+
+/** To the person: the owner agreed, so the tree is now open to them. */
+export function sendAccessApprovedEmail(input: {
+  to: string;
+  treeName: string;
+  treeId: string;
+}): Promise<boolean> {
+  return sendTemplate({
+    to: input.to,
+    subject: `You now have access to ${input.treeName}`,
+    label: "access-approved",
+    element: createElement(AccessApprovedEmail, {
+      treeName: input.treeName,
+      treeUrl: appUrl(`/tree/${input.treeId}`),
     }),
   });
 }

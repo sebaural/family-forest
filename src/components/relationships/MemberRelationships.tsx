@@ -24,14 +24,18 @@ interface MemberRelationshipsProps {
   treeId: string;
   member: Member;
   members: Member[];
-  canEdit: boolean;
+  /** Anyone with access may add relationships (viewers included). */
+  canAdd: boolean;
+  /** Removing one stays with owners and editors. */
+  canRemove: boolean;
 }
 
 export function MemberRelationships({
   treeId,
   member,
   members,
-  canEdit,
+  canAdd,
+  canRemove,
 }: MemberRelationshipsProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const utils = trpc.useUtils();
@@ -59,7 +63,7 @@ export function MemberRelationships({
     <section className="space-y-3 border-t border-gray-200 pt-6 dark:border-gray-800">
       <div className="flex items-center justify-between gap-3">
         <h3 className="font-semibold">Relationships</h3>
-        {canEdit && (
+        {canAdd && (
           <span
             title={
               others.length === 0
@@ -109,7 +113,7 @@ export function MemberRelationships({
                 <span className={mutedText}>{relationshipLabel(relationship, member.id)}</span>{" "}
                 {other ? memberFullName(other) : "Loading…"}
               </span>
-              {canEdit && (
+              {canRemove && (
                 <button
                   type="button"
                   aria-label={`Remove relationship with ${other ? memberFullName(other) : "this member"}`}
@@ -125,7 +129,7 @@ export function MemberRelationships({
         })}
       </ul>
 
-      {canEdit && (
+      {canAdd && (
         <RelationshipDialog
           treeId={treeId}
           subject={{ kind: "saved", member }}

@@ -23,16 +23,25 @@ export default async function DashboardPage({
   const userId = session.user.id;
   const user = await db.user.findUnique({ where: { id: userId }, select: { onboardingStep: true } });
   if (user && user.onboardingStep < ONBOARDING_COMPLETE) {
+    // Trees awaiting the owner's approval count too: that person was invited and
+    // mustn't be pushed into onboarding (which would send them straight back here).
     const trees = await db.familyTree.count({
       where: { OR: [{ ownerId: userId }, { collaborators: { some: { userId } } }] },
     });
     if (trees === 0) redirect("/onboarding");
   }
 
+  const awaiting = await db.treeCollaborator.findMany({
+    where: { userId, approvedAt: null },
+    select: { tree: { select: { name: true } } },
+    orderBy: { createdAt: "asc" },
+  });
+
   return (
     <TreeDashboard
       userId={userId}
       treeNotFound={searchParams.error === "tree-not-found"}
+      awaitingApproval={awaiting.map((entry) => entry.tree.name)}
     />
   );
 }

@@ -113,15 +113,18 @@ model FamilyTree {
 
 // ── Collaborators ─────────────────────────────────────────────────────────
 model TreeCollaborator {
-  treeId    String
-  userId    String
-  role      CollabRole @default(VIEWER)
-  createdAt DateTime   @default(now())
+  treeId     String
+  userId     String
+  role       CollabRole @default(VIEWER)
+  createdAt  DateTime   @default(now())
+  // null while an invite sent by a non-owner awaits the owner's approval: no access yet.
+  approvedAt DateTime?
 
   tree FamilyTree @relation(fields: [treeId], references: [id], onDelete: Cascade)
   user User       @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([treeId, userId])
+  @@index([treeId, approvedAt])
 }
 
 enum CollabRole {

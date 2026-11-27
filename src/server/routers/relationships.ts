@@ -22,7 +22,8 @@ export const relationshipsRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const { treeId, fromId, toId, type } = input;
-      await assertTreeAccess(treeId, ctx.session.user.id, "EDITOR");
+      // Viewers may add relationships too; removing one stays with editors.
+      await assertTreeAccess(treeId, ctx.session.user.id, "VIEWER");
 
       if (fromId === toId) {
         throw new TRPCError({

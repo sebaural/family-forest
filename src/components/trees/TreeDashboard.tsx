@@ -11,9 +11,12 @@ import { trpc } from "@/trpc/client";
 export function TreeDashboard({
   userId,
   treeNotFound,
+  awaitingApproval = [],
 }: {
   userId: string;
   treeNotFound: boolean;
+  /** Trees this user accepted an invite to that still await the owner's approval. */
+  awaitingApproval?: string[];
 }) {
   const [createOpen, setCreateOpen] = useState(false);
   const trees = trpc.trees.list.useQuery();
@@ -35,6 +38,16 @@ export function TreeDashboard({
           className="rounded border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200"
         >
           That tree doesn&apos;t exist or you don&apos;t have access to it.
+        </p>
+      )}
+
+      {awaitingApproval.length > 0 && (
+        <p
+          role="status"
+          className="rounded border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200"
+        >
+          Waiting for the owner&apos;s approval to join {awaitingApproval.join(", ")}. We&apos;ll email
+          you when you have access.
         </p>
       )}
 

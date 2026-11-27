@@ -42,6 +42,7 @@ export async function runDigest(options: { dryRun?: boolean; now?: Date } = {}):
       name: true,
       owner: { select: { id: true, email: true, name: true, digestEnabled: true } },
       collaborators: {
+        where: { approvedAt: { not: null } },
         select: { user: { select: { id: true, email: true, name: true, digestEnabled: true } } },
       },
       activity: {

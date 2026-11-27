@@ -31,7 +31,7 @@ export const treesRouter = router({
   list: protectedProcedure.query(({ ctx }) => {
     const userId = ctx.session.user.id;
     return db.familyTree.findMany({
-      where: { OR: [{ ownerId: userId }, { collaborators: { some: { userId } } }] },
+      where: { OR: [{ ownerId: userId }, { collaborators: { some: { userId, approvedAt: { not: null } } } }] },
       select: {
         id: true,
         name: true,
@@ -57,6 +57,7 @@ export const treesRouter = router({
             orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
           },
           collaborators: {
+            where: { approvedAt: { not: null } },
             select: {
               role: true,
               createdAt: true,

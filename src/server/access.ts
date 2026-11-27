@@ -16,7 +16,7 @@ export async function assertTreeAccess(
 ): Promise<{ ownerId: string; role: TreeRole }> {
   const tree = await db.familyTree.findUnique({
     where: { id: treeId },
-    select: { ownerId: true, collaborators: { where: { userId }, select: { role: true } } },
+    select: { ownerId: true, collaborators: { where: { userId, approvedAt: { not: null } }, select: { role: true } } },
   });
 
   const role: TreeRole | undefined =
